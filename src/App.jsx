@@ -6,8 +6,9 @@ import {
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
-// --- REAL SUPABASE CLIENT (Production Configuration) ---
-// This requires VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env or GitHub Secrets
+// --- REAL SUPABASE CLIENT (Production) ---
+// This is the ONLY declaration of 'supabase' allowed.
+// Ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set in GitHub Secrets.
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
