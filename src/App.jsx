@@ -4,33 +4,16 @@ import {
   Upload, Youtube, FileText, History, Settings, 
   Repeat, Mic, Volume2, User, LogOut, Loader2, Sparkles, X, Database, Save
 } from 'lucide-react';
-
-/* =============================================================================
-  INSTRUCTIONS FOR PRODUCTION (LOCAL DEVELOPMENT):
-  1. Install dependencies: npm install @supabase/supabase-js
-  2. Uncomment the 'Real Supabase Client' section below.
-  3. Comment out or remove the 'Mock Supabase Client' section.
-  4. Create a .env file with VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.
-  =============================================================================
-*/
-
-// --- 1. REAL SUPABASE CLIENT (Uncomment for Production) ---
 import { createClient } from '@supabase/supabase-js';
+
+// --- REAL SUPABASE CLIENT (Production Configuration) ---
+// This requires VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env or GitHub Secrets
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-
-// Toggle this variable to swtich between Real and Mock in your local setup
-// In Canvas, we MUST use mockSupabase because we can't install libraries.
-const supabase = mockSupabase; 
-
-
 // --- HELPER: Gemini / Edge Function Wrapper ---
 const generateTranscript = async (sourceType, sourceUrl, contextText) => {
-  /* In Production, this calls the Supabase Edge Function 'generate-transcript'.
-     The Edge function holds the GEMINI_API_KEY securely.
-  */
   try {
     const { data, error } = await supabase.functions.invoke('generate-transcript', {
       body: { sourceType, sourceUrl, contextText }
@@ -40,14 +23,12 @@ const generateTranscript = async (sourceType, sourceUrl, contextText) => {
     return data.transcript;
   } catch (err) {
     console.error("Edge Function Error:", err);
-    // Fallback for demo if Edge Function fails/doesn't exist
     return [
       { text: "Error connecting to AI service.", start: 0, end: 2, speaker: "System" },
       { text: "Please check your Supabase Edge Function deployment.", start: 2, end: 5, speaker: "System" }
     ];
   }
 };
-
 
 // --- COMPONENTS ---
 
@@ -62,7 +43,6 @@ const LoginModal = ({ isOpen, onClose, onLogin }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    // In a real app, you'd handle password or magic link here
     await onLogin(email);
     setLoading(false);
     onClose();
@@ -105,7 +85,7 @@ const SmartPlayer = ({
   isPlaying, 
   setIsPlaying, 
   seekTime, 
-  onTimeUpdate,
+  onTimeUpdate, 
   loopRange 
 }) => {
   const videoRef = useRef(null);
@@ -281,8 +261,15 @@ export default function App() {
 
   // 3. Login Handlers
   const handleLogin = async (email) => {
+    // Basic Magic Link or Passwordless login could be used here. 
+    // For now, we simulate with a password login (configured in Supabase)
     const { error } = await supabase.auth.signInWithPassword({ email, password: 'dummy-password' });
-    if (error) alert(error.message);
+    if (error) {
+       // Fallback to SignUp if user doesn't exist (Simplified flow)
+       const { error: signUpError } = await supabase.auth.signUp({ email, password: 'dummy-password' });
+       if (signUpError) alert(signUpError.message);
+       else alert("Account created! You are logged in.");
+    }
   };
 
   const handleLogout = async () => {
@@ -295,9 +282,6 @@ export default function App() {
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    
-    // In a real app, you would upload this file to Supabase Storage here
-    // const { data } = await supabase.storage.from('media').upload(...)
     
     const url = URL.createObjectURL(file);
     setSource({ type: 'file', url, title: file.name, originalUrl: null });
@@ -353,10 +337,9 @@ export default function App() {
       const id = (match && match[2].length === 11) ? match[2] : null;
       setSource({ type: 'youtube', url: id, title: item.title, originalUrl: item.source_url });
     } else {
-      // For local files, we can't restore the blob URL on refresh in a real app without re-downloading from Storage
-      // For this demo, we just set the title
+      // For local files, we can't restore the blob URL on refresh without re-downloading from Storage
       setSource({ type: 'file', url: null, title: item.title });
-      alert("Please re-upload the local file for this session.");
+      alert("For local files, please re-upload the video/audio file to play.");
     }
   };
 
@@ -393,7 +376,7 @@ export default function App() {
             <Volume2 className="text-white w-5 h-5" />
           </div>
           <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">
-            LingoMate <span className="text-xs text-gray-400 font-normal ml-1">Supabase Edition</span>
+            LingoMate <span className="text-xs text-gray-400 font-normal ml-1">Beta</span>
           </h1>
         </div>
         
