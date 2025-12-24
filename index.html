@@ -17,13 +17,15 @@
         .slide-up { animation: slideUp 0.5s ease-out; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Smooth width transition for panels */
+        .panel-transition { transition: width 0.3s ease-in-out, flex-grow 0.3s ease-in-out; }
     </style>
 </head>
 <body class="bg-white text-gray-900 h-screen flex flex-col overflow-hidden selection:bg-gray-200 selection:text-black">
     <div id="root" class="h-full flex flex-col"></div>
 
     <script type="text/babel" data-type="module">
-        // Fixed imports with pinned versions to prevent duplicate React instances
         import React, { useState, useEffect, useRef, useCallback } from 'https://esm.sh/react@18.3.1?dev';
         import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client?dev';
         import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
@@ -31,20 +33,19 @@
             Play, Pause, RotateCcw, ChevronRight, ChevronLeft, 
             Upload, Youtube, FileText, History, Settings, 
             Repeat, Mic, Volume2, User, LogOut, Loader2, Sparkles, X, Database, Save, AlertCircle, 
-            CheckCircle2, ArrowRight, Globe
+            CheckCircle2, ArrowRight, Globe, Music
         } from 'https://esm.sh/lucide-react@0.344.0?dev&deps=react@18.3.1';
 
         // --- CONFIGURATION ---
-        // 1. SUPABASE: Enter your credentials here to enable persistence
+        // 1. SUPABASE: Credentials
         const SUPABASE_URL = 'https://tnwtvxmbjwbgiwruttju.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRud3R2eG1iandiZ2l3cnV0dGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU2NjYzNzgsImV4cCI6MjA4MTI0MjM3OH0.3AexQNzabxTLV2PbkusFwSZe7n1jsYDBJF7GB2SXhRk';
 
-        // 2. GEMINI: The API key is injected by the environment automatically
+        // 2. GEMINI: API Key
         const apiKey = "AIzaSyA8EpZ0xiCotalQmvASR10L5o3YwlFEjcU"; 
 
         // Initialize Supabase Client
         let supabase = null;
-        // Check if user has replaced the placeholders
         const isSupabaseConfigured = SUPABASE_URL && !SUPABASE_URL.includes('INSERT_YOUR');
         
         if (isSupabaseConfigured) {
@@ -54,11 +55,17 @@
         // --- GEMINI HELPER ---
         const generateTranscript = async (sourceType, sourceUrl, contextText) => {
             if (!apiKey) {
-                alert("Gemini API Key is missing. Please ensure it is set in the environment.");
-                return [];
+                console.warn("Gemini API Key missing. Returning mock data.");
+                // Mock transcript for demo purposes
+                return new Promise(resolve => setTimeout(() => resolve([
+                    { text: "Welcome to LingoMate! This is a demo transcript.", start: 0, end: 3, speaker: "AI Host" },
+                    { text: "Since no API key was provided, I'm simulating the response.", start: 3, end: 7, speaker: "AI Host" },
+                    { text: "You can click on these segments to jump around the audio.", start: 7, end: 11, speaker: "AI Host" },
+                    { text: "This allows you to test the looping and playback features.", start: 11, end: 15, speaker: "AI Host" },
+                    { text: "To get real transcripts, please add your Gemini API Key in the code.", start: 15, end: 20, speaker: "AI Host" }
+                ]), 1500));
             }
 
-            // Using Gemini 2.5 Flash Preview (Gemini 2.0)
             const prompt = `
                 You are a professional transcription engine.
                 Generate a REALISTIC, TIMESTAMPED transcript based on this context: "${contextText || 'General content'}".
@@ -111,7 +118,7 @@
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
             const [loading, setLoading] = useState(false);
-            const [mode, setMode] = useState('signin'); // 'signin' or 'signup'
+            const [mode, setMode] = useState('signin'); 
 
             if (!isOpen) return null;
 
@@ -183,7 +190,6 @@
         const LandingPage = ({ onLoginClick, onGuestClick }) => {
             return (
                 <div className="h-full flex flex-col bg-white overflow-y-auto">
-                    {/* Navbar */}
                     <nav className="flex justify-between items-center px-6 py-5 max-w-7xl mx-auto w-full border-b border-gray-100">
                         <div className="flex items-center gap-2">
                             <div className="bg-black p-2 rounded-none">
@@ -201,7 +207,6 @@
                         </div>
                     </nav>
 
-                    {/* Hero Section */}
                     <main className="flex-1 flex items-center justify-center px-6 py-12 bg-white">
                         <div className="max-w-4xl mx-auto text-center slide-up">
                             <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-gray-100 text-black text-xs font-bold uppercase tracking-wider mb-8 border border-gray-200">
@@ -225,7 +230,6 @@
                                 </button>
                             </div>
 
-                            {/* Features Preview */}
                             <div className="grid md:grid-cols-3 gap-8 mt-24 text-left">
                                 <div className="p-8 bg-white border border-gray-200 hover:border-black transition-colors group">
                                     <div className="w-12 h-12 bg-gray-100 flex items-center justify-center mb-6 text-black group-hover:bg-black group-hover:text-white transition-colors">
@@ -264,7 +268,7 @@
             const playerRef = useRef(null);
             const [youtubeReady, setYoutubeReady] = useState(false);
 
-            // File Player Sync
+            // File Player Sync (Audio & Video)
             useEffect(() => {
                 if (source?.type === 'file' && videoRef.current) {
                     if (Math.abs(videoRef.current.currentTime - seekTime) > 0.5) {
@@ -345,6 +349,20 @@
                 return () => clearInterval(interval);
             }, [isPlaying, source]);
 
+            // Audio Player Renderer (Hidden from UI, handled by control bar)
+            if (source?.type === 'file' && source?.mediaType === 'audio') {
+                return (
+                    <div className="hidden">
+                        <audio 
+                            ref={videoRef} 
+                            src={source.url} 
+                            onEnded={() => setIsPlaying(false)}
+                        />
+                    </div>
+                );
+            }
+
+            // Video Player Renderer
             return (
                 <div className="relative aspect-video bg-black overflow-hidden shadow-none ring-1 ring-gray-200">
                     {source?.type === 'file' ? (
@@ -376,7 +394,7 @@
 
         const App = () => {
             const [user, setUser] = useState(null);
-            const [view, setView] = useState('landing'); // 'landing' | 'app'
+            const [view, setView] = useState('landing');
             const [isLoginOpen, setIsLoginOpen] = useState(false);
             const [sidebarOpen, setSidebarOpen] = useState(true);
             const [source, setSource] = useState(null);
@@ -399,7 +417,7 @@
                     const { data } = await supabase.auth.getUser();
                     if (data.user) {
                         setUser(data.user);
-                        setView('app'); // Auto-redirect to app if user found
+                        setView('app');
                     }
                 };
                 checkUser();
@@ -407,7 +425,7 @@
                 const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
                     const currentUser = session?.user ?? null;
                     setUser(currentUser);
-                    if (currentUser) setView('app'); // Redirect on login
+                    if (currentUser) setView('app');
                 });
                 
                 return () => subscription.unsubscribe();
@@ -419,6 +437,7 @@
             }, [user, view]);
 
             const fetchHistory = async () => {
+                if (!supabase) return;
                 const { data, error } = await supabase
                     .from('transcripts')
                     .select('*')
@@ -428,7 +447,10 @@
 
             const handleLogin = async (email, password, mode) => {
                 if (!isSupabaseConfigured) {
-                    alert("Supabase not configured. Please edit the HTML file.");
+                    alert("Supabase not configured. Entering Demo Mode with mock data.");
+                    setUser({ email: email || 'demo@lingomate.ai', id: 'demo-user' });
+                    setView('app');
+                    setIsLoginOpen(false);
                     return;
                 }
                 
@@ -446,22 +468,29 @@
                     alert(error.message);
                 } else {
                     setIsLoginOpen(false);
-                    setView('app'); // Navigate to app on success
+                    setView('app');
                 }
             };
 
             const handleLogout = async () => {
-                await supabase.auth.signOut();
+                if (supabase) await supabase.auth.signOut();
                 setUser(null);
                 setHistory([]);
-                setView('landing'); // Go back to landing page on logout
+                setView('landing');
             };
 
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
                 const url = URL.createObjectURL(file);
-                setSource({ type: 'file', url, title: file.name, originalUrl: null });
+                const isAudio = file.type.startsWith('audio/');
+                setSource({ 
+                    type: 'file', 
+                    mediaType: isAudio ? 'audio' : 'video', 
+                    url, 
+                    title: file.name, 
+                    originalUrl: null 
+                });
                 setTranscript([]);
                 setIsPlaying(false);
             };
@@ -472,7 +501,7 @@
                 const match = inputUrl.match(regExp);
                 const id = (match && match[2].length === 11) ? match[2] : null;
                 if (id) {
-                    setSource({ type: 'youtube', url: id, title: `YouTube Video`, originalUrl: inputUrl });
+                    setSource({ type: 'youtube', mediaType: 'video', url: id, title: `YouTube Video`, originalUrl: inputUrl });
                     setTranscript([]);
                     setIsPlaying(false);
                 } else {
@@ -489,7 +518,6 @@
                 setTranscript(result);
                 setIsProcessing(false);
                 
-                // Save to DB if logged in and valid result
                 if (user && result && result.length > 0 && result[0].speaker !== "System" && isSupabaseConfigured) {
                     await supabase.from('transcripts').insert([{
                         user_id: user.id,
@@ -508,9 +536,10 @@
                     const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
                     const match = item.source_url.match(regExp);
                     const id = (match && match[2].length === 11) ? match[2] : null;
-                    setSource({ type: 'youtube', url: id, title: item.title, originalUrl: item.source_url });
+                    setSource({ type: 'youtube', mediaType: 'video', url: id, title: item.title, originalUrl: item.source_url });
                 } else {
-                    setSource({ type: 'file', url: null, title: item.title });
+                    // For files, we need the user to re-upload, so we don't set a URL yet
+                    setSource({ type: 'file', mediaType: null, url: null, title: item.title });
                     alert("For local files, please re-upload the video/audio file to play.");
                 }
             };
@@ -532,7 +561,6 @@
                 }
             }, [activeIndex, isPlaying]);
 
-            // VIEW ROUTING
             if (view === 'landing') {
                 return (
                     <>
@@ -584,8 +612,8 @@
 
                     {/* Main Content */}
                     <div className="flex-1 flex overflow-hidden">
-                        {/* Sidebar */}
-                        <aside className={`${sidebarOpen ? 'w-80' : 'w-0'} bg-white border-r border-gray-200 transition-all duration-300 overflow-hidden flex flex-col`}>
+                        {/* Collapsible Sidebar */}
+                        <aside className={`${sidebarOpen ? 'w-80 border-r' : 'w-0 border-none'} bg-white border-gray-200 transition-all duration-300 overflow-hidden flex flex-col`}>
                             <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
                                 <h2 className="font-bold text-gray-900 flex items-center gap-2 text-sm uppercase tracking-wide"><History className="w-4 h-4" /> Library</h2>
                             </div>
@@ -611,11 +639,12 @@
                             </div>
                         </aside>
 
-                        {/* Center Panel (Player) */}
-                        <main className="flex-1 flex flex-col md:flex-row min-w-0">
-                            <div className="flex-[3] flex flex-col bg-gray-50 border-r border-gray-200 overflow-y-auto custom-scrollbar">
+                        {/* Center Panel (Player & Controls) */}
+                        <main className="flex-1 flex flex-col md:flex-row min-w-0 panel-transition">
+                            {/* Player Column - takes full width if transcript is empty */}
+                            <div className={`flex flex-col bg-gray-50 border-r border-gray-200 overflow-y-auto custom-scrollbar flex-1`}>
                                 <div className="p-2 sticky top-0 z-10">
-                                    <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 bg-white border border-gray-200 hover:border-black rounded-none text-gray-600 shadow-sm transition-all">
+                                    <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 bg-white border border-gray-200 hover:border-black rounded-none text-gray-600 shadow-sm transition-all" title="Toggle Library">
                                         {sidebarOpen ? <ChevronLeft className="w-5 h-5"/> : <ChevronRight className="w-5 h-5"/>}
                                     </button>
                                 </div>
@@ -647,7 +676,10 @@
                                     {source && (
                                         <div className="space-y-4 fade-in">
                                             <div className="flex justify-between items-center border-b border-gray-200 pb-2">
-                                                <h2 className="font-bold text-lg truncate text-gray-900">{source.title}</h2>
+                                                <h2 className="font-bold text-lg truncate text-gray-900 flex items-center gap-2">
+                                                    {source.mediaType === 'audio' && <Music className="w-4 h-4 text-gray-500"/>}
+                                                    {source.title}
+                                                </h2>
                                                 <button onClick={() => setSource(null)} className="text-xs text-red-600 hover:text-white hover:bg-red-600 px-3 py-1 transition-colors font-bold uppercase tracking-wider border border-transparent hover:border-red-600">Close</button>
                                             </div>
 
@@ -700,20 +732,15 @@
                                 </div>
                             </div>
 
-                            {/* Transcript Panel */}
-                            <div className="flex-[2] bg-white flex flex-col border-l border-gray-200 h-full overflow-hidden shadow-none z-10">
-                                <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 sticky top-0 z-20">
-                                    <h3 className="font-bold text-gray-900 flex items-center gap-2 text-sm uppercase tracking-wide"><FileText className="w-4 h-4" /> Transcript</h3>
-                                    {transcript.length > 0 && <span className="text-[10px] font-bold bg-white text-black px-2 py-1 border border-gray-300 font-mono">{transcript.length} SEGMENTS</span>}
-                                </div>
-                                <div className="flex-1 overflow-y-auto p-4 space-y-4 relative bg-white">
-                                    {transcript.length === 0 ? (
-                                        <div className="h-full flex flex-col items-center justify-center text-gray-300 space-y-3">
-                                            <FileText className="w-12 h-12 opacity-20" />
-                                            <p className="text-sm font-medium text-gray-400">No transcript available.</p>
-                                        </div>
-                                    ) : (
-                                        transcript.map((line, idx) => {
+                            {/* Transcript Panel - Only shown when transcript exists */}
+                            {transcript.length > 0 && (
+                                <div className="w-full md:w-96 bg-white flex flex-col border-l border-gray-200 h-full overflow-hidden shadow-none z-10 flex-shrink-0">
+                                    <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 sticky top-0 z-20">
+                                        <h3 className="font-bold text-gray-900 flex items-center gap-2 text-sm uppercase tracking-wide"><FileText className="w-4 h-4" /> Transcript</h3>
+                                        <span className="text-[10px] font-bold bg-white text-black px-2 py-1 border border-gray-300 font-mono">{transcript.length} SEGMENTS</span>
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto p-4 space-y-4 relative bg-white">
+                                        {transcript.map((line, idx) => {
                                             const isActive = idx === activeIndex;
                                             const isLooping = loopRange?.start === line.start;
                                             return (
@@ -748,10 +775,10 @@
                                                     </p>
                                                 </div>
                                             );
-                                        })
-                                    )}
+                                        })}
+                                    </div>
                                 </div>
-                            </div>
+                            )}
                         </main>
                     </div>
                 </div>
