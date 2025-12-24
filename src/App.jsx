@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
-// --- REAL SUPABASE CLIENT ---
+// --- REAL SUPABASE CLIENT (Production) ---
 // Ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set in GitHub Secrets or .env
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -31,8 +31,9 @@ const generateTranscript = async (sourceType, sourceUrl, contextText) => {
   `;
 
   try {
+    // UPDATED MODEL: Using 'gemini-1.5-flash-latest' to fix 404 errors
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -44,7 +45,14 @@ const generateTranscript = async (sourceType, sourceUrl, contextText) => {
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`Google API Error (${response.status}): ${errText}`);
+      let errMessage = `Google API Error (${response.status})`;
+      try {
+        const errJson = JSON.parse(errText);
+        errMessage += `: ${errJson.error?.message || errText}`;
+      } catch (e) {
+        errMessage += `: ${errText}`;
+      }
+      throw new Error(errMessage);
     }
 
     const data = await response.json();
@@ -60,7 +68,7 @@ const generateTranscript = async (sourceType, sourceUrl, contextText) => {
     console.error("AI Generation Error:", err);
     return [
       { text: "Error connecting to AI service.", start: 0, end: 2, speaker: "System" },
-      { text: `Details: ${err.message}`, start: 2, end: 5, speaker: "System" }
+      { text: `Details: ${err.message}`, start: 2, end: 10, speaker: "System" }
     ];
   }
 };
@@ -312,7 +320,7 @@ export default function App() {
     const result = await generateTranscript(source.type, source.originalUrl, contextPrompt || source.title);
     setTranscript(result);
     setIsProcessing(false);
-    if (user) {
+    if (user && result && result.length > 0 && result[0].speaker !== "System") {
       await supabase.from('transcripts').insert([{
         user_id: user.id,
         title: source.title,
