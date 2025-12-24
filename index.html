@@ -55,8 +55,15 @@
         // --- GEMINI HELPER ---
         const generateTranscript = async (sourceType, sourceUrl, contextText) => {
             if (!apiKey) {
-                alert("Gemini API Key is missing. Please ensure it is set in the environment.");
-                return [];
+                console.warn("Gemini API Key missing. Returning mock data.");
+                // Mock transcript for demo purposes
+                return new Promise(resolve => setTimeout(() => resolve([
+                    { text: "Welcome to LingoMate! This is a demo transcript.", start: 0, end: 3, speaker: "AI Host" },
+                    { text: "Since no API key was provided, I'm simulating the response.", start: 3, end: 7, speaker: "AI Host" },
+                    { text: "You can click on these segments to jump around the audio.", start: 7, end: 11, speaker: "AI Host" },
+                    { text: "This allows you to test the looping and playback features.", start: 11, end: 15, speaker: "AI Host" },
+                    { text: "To get real transcripts, please add your Gemini API Key in the code.", start: 15, end: 20, speaker: "AI Host" }
+                ]), 1500));
             }
 
             const prompt = `
@@ -430,6 +437,7 @@
             }, [user, view]);
 
             const fetchHistory = async () => {
+                if (!supabase) return;
                 const { data, error } = await supabase
                     .from('transcripts')
                     .select('*')
@@ -439,7 +447,10 @@
 
             const handleLogin = async (email, password, mode) => {
                 if (!isSupabaseConfigured) {
-                    alert("Supabase not configured. Please edit the HTML file.");
+                    alert("Supabase not configured. Entering Demo Mode with mock data.");
+                    setUser({ email: email || 'demo@lingomate.ai', id: 'demo-user' });
+                    setView('app');
+                    setIsLoginOpen(false);
                     return;
                 }
                 
@@ -462,7 +473,7 @@
             };
 
             const handleLogout = async () => {
-                await supabase.auth.signOut();
+                if (supabase) await supabase.auth.signOut();
                 setUser(null);
                 setHistory([]);
                 setView('landing');
