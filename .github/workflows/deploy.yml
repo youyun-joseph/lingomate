@@ -1,0 +1,45 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: ["main"] # or "master"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inject Secrets
+        run: |
+          # Use sed to replace placeholders in index.html with actual secrets
+          sed -i "s|INSERT_SUPABASE_URL_SECRET|${{ secrets.SUPABASE_URL }}|g" index.html
+          sed -i "s|INSERT_SUPABASE_ANON_KEY_SECRET|${{ secrets.SUPABASE_ANON_KEY }}|g" index.html
+          sed -i "s|INSERT_GEMINI_API_KEY_SECRET|${{ secrets.GEMINI_API_KEY }}|g" index.html
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # Upload the entire repository (which now includes the modified index.html)
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

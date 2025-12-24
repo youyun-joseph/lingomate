@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LingoMate - AI Language Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f9fafb; }
+        ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+        .fade-in { animation: fadeIn 0.5s ease-out; }
+        .slide-up { animation: slideUp 0.5s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-white text-gray-900 h-screen flex flex-col overflow-hidden selection:bg-gray-200 selection:text-black">
+    <div id="root" class="h-full flex flex-col"></div>
+
+    <script type="text/babel" data-type="module">
+        // Fixed imports with pinned versions to prevent duplicate React instances
+        import React, { useState, useEffect, useRef, useCallback } from 'https://esm.sh/react@18.3.1?dev';
+        import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client?dev';
+        import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+        import { 
+            Play, Pause, RotateCcw, ChevronRight, ChevronLeft, 
+            Upload, Youtube, FileText, History, Settings, 
+            Repeat, Mic, Volume2, User, LogOut, Loader2, Sparkles, X, Database, Save, AlertCircle, 
+            CheckCircle2, ArrowRight, Globe
+        } from 'https://esm.sh/lucide-react@0.344.0?dev&deps=react@18.3.1';
+
+        // --- CONFIGURATION ---
+        // 1. SUPABASE: Enter your credentials here to enable persistence
+        const SUPABASE_URL = 'INSERT_YOUR_SUPABASE_URL_HERE';
+        const SUPABASE_ANON_KEY = 'INSERT_YOUR_SUPABASE_ANON_KEY_HERE';
+
+        // 2. GEMINI: The API key is injected by the environment automatically
+        const apiKey = "INSERT_GEMINI_API_KEY_SECRET"; 
+
+        // Initialize Supabase Client
+        let supabase = null;
+        // Check if user has replaced the placeholders
+        const isSupabaseConfigured = SUPABASE_URL && !SUPABASE_URL.includes('INSERT_YOUR');
+        
+        if (isSupabaseConfigured) {
+            supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        }
+
+        // --- GEMINI HELPER ---
+        const generateTranscript = async (sourceType, sourceUrl, contextText) => {
+            if (!apiKey) {
+                alert("Gemini API Key is missing. Please ensure it is set in the environment.");
+                return [];
+            }
+
+            // Using Gemini 2.5 Flash Preview (Gemini 2.0)
+            const prompt = `
+                You are a professional transcription engine.
+                Generate a REALISTIC, TIMESTAMPED transcript based on this context: "${contextText || 'General content'}".
+                Source URL: ${sourceUrl || 'Unknown'}
+                
+                Output STRICT JSON format only. No markdown.
+                Schema: Array<{ text: string, start: number, end: number, speaker: string }>
+                Ensure timestamps increase logically.
+            `;
+
+            try {
+                const response = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }]
+                        })
+                    }
+                );
+
+                if (!response.ok) {
+                   const errText = await response.text();
+                   throw new Error(`API Error: ${response.status} - ${errText}`);
+                }
+
+                const data = await response.json();
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                
+                if (!text) throw new Error("No text generated.");
+
+                const jsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
+                return JSON.parse(jsonStr);
+
+            } catch (err) {
+                console.error("AI Generation Error:", err);
+                return [
+                    { text: "Error connecting to AI service.", start: 0, end: 2, speaker: "System" },
+                    { text: `Details: ${err.message}`, start: 2, end: 5, speaker: "System" }
+                ];
+            }
+        };
+
+        // --- COMPONENTS ---
+
+        const Spinner = () => <Loader2 className="animate-spin w-5 h-5" />;
+
+        const LoginModal = ({ isOpen, onClose, onLogin }) => {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [mode, setMode] = useState('signin'); // 'signin' or 'signup'
+
+            if (!isOpen) return null;
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                await onLogin(email, password, mode);
+                setLoading(false);
+            };
+
+            return (
+                <div className="fixed inset-0 bg-white/80 flex items-center justify-center z-50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-white p-8 rounded-none border border-black w-full max-w-sm shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] scale-100 transform transition-all">
+                        <div className="text-center mb-8">
+                            <div className="bg-black w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                                <User className="w-8 h-8 text-white" />
+                            </div>
+                            <h2 className="text-2xl font-bold text-black tracking-tight">{mode === 'signin' ? 'Welcome Back' : 'Create Account'}</h2>
+                            <p className="text-sm text-gray-500 mt-2">Sign in to access your saved transcripts</p>
+                        </div>
+                        <form onSubmit={handleSubmit} className="space-y-5">
+                            <div>
+                                <label className="block text-xs font-bold text-black uppercase mb-1.5 tracking-wider">Email</label>
+                                <input 
+                                    type="email" 
+                                    required
+                                    className="w-full px-4 py-3 bg-white border border-gray-300 focus:border-black focus:ring-0 outline-none transition-all text-sm text-black placeholder-gray-400"
+                                    value={email}
+                                    onChange={e => setEmail(e.target.value)}
+                                    placeholder="you@example.com"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-black uppercase mb-1.5 tracking-wider">Password</label>
+                                <input 
+                                    type="password" 
+                                    required
+                                    className="w-full px-4 py-3 bg-white border border-gray-300 focus:border-black focus:ring-0 outline-none transition-all text-sm text-black placeholder-gray-400"
+                                    value={password}
+                                    onChange={e => setPassword(e.target.value)}
+                                    placeholder="••••••••"
+                                    minLength={6}
+                                />
+                            </div>
+                            <button 
+                                type="submit" 
+                                disabled={loading}
+                                className="w-full bg-black text-white py-3.5 font-bold hover:bg-gray-800 transition-all flex justify-center shadow-none disabled:opacity-70 disabled:cursor-not-allowed"
+                            >
+                                {loading ? <Spinner /> : (mode === 'signin' ? "Sign In" : "Create Account")}
+                            </button>
+                        </form>
+                        <div className="mt-6 text-center border-t border-gray-100 pt-4">
+                            <button 
+                                onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}
+                                className="text-sm text-black hover:underline font-medium"
+                            >
+                                {mode === 'signin' ? "New here? Create an account" : "Already have an account? Sign in"}
+                            </button>
+                        </div>
+                        <button onClick={onClose} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-black transition-colors">
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        const LandingPage = ({ onLoginClick, onGuestClick }) => {
+            return (
+                <div className="h-full flex flex-col bg-white overflow-y-auto">
+                    {/* Navbar */}
+                    <nav className="flex justify-between items-center px-6 py-5 max-w-7xl mx-auto w-full border-b border-gray-100">
+                        <div className="flex items-center gap-2">
+                            <div className="bg-black p-2 rounded-none">
+                                <Volume2 className="text-white w-5 h-5" />
+                            </div>
+                            <span className="text-xl font-bold text-black tracking-tight">LingoMate</span>
+                        </div>
+                        <div className="flex gap-4">
+                            <button onClick={onLoginClick} className="px-5 py-2 text-sm font-medium text-black hover:bg-gray-50 transition-colors border border-transparent">
+                                Sign In
+                            </button>
+                            <button onClick={onGuestClick} className="px-5 py-2 text-sm font-bold text-white bg-black hover:bg-gray-800 transition-all shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] border border-black">
+                                Try Demo
+                            </button>
+                        </div>
+                    </nav>
+
+                    {/* Hero Section */}
+                    <main className="flex-1 flex items-center justify-center px-6 py-12 bg-white">
+                        <div className="max-w-4xl mx-auto text-center slide-up">
+                            <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-gray-100 text-black text-xs font-bold uppercase tracking-wider mb-8 border border-gray-200">
+                                <Sparkles className="w-3 h-3" /> New Gemini 2.0 Engine
+                            </div>
+                            <h1 className="text-5xl md:text-7xl font-black text-black mb-8 tracking-tight leading-[1.1]">
+                                Master Languages <br/>
+                                <span className="text-gray-500 font-bold decoration-4 decoration-black">with AI Transcripts</span>
+                            </h1>
+                            <p className="text-lg md:text-xl text-gray-600 mb-12 max-w-2xl mx-auto leading-relaxed font-light">
+                                Turn any YouTube video or audio file into an interactive language lesson. 
+                                Get accurate timestamps, loop sections, and save your progress.
+                            </p>
+                            
+                            <div className="flex flex-col sm:flex-row gap-6 justify-center items-center">
+                                <button onClick={onLoginClick} className="w-full sm:w-auto px-8 py-4 bg-black text-white font-bold text-lg hover:bg-gray-900 transition-all shadow-[6px_6px_0px_0px_rgba(209,213,219,1)] hover:shadow-none hover:translate-x-[3px] hover:translate-y-[3px] flex items-center justify-center gap-2 border border-black">
+                                    Get Started Free <ArrowRight className="w-5 h-5" />
+                                </button>
+                                <button onClick={onGuestClick} className="w-full sm:w-auto px-8 py-4 bg-white text-black border border-gray-300 font-bold text-lg hover:bg-gray-50 transition-all flex items-center justify-center gap-2">
+                                    Try Without Login
+                                </button>
+                            </div>
+
+                            {/* Features Preview */}
+                            <div className="grid md:grid-cols-3 gap-8 mt-24 text-left">
+                                <div className="p-8 bg-white border border-gray-200 hover:border-black transition-colors group">
+                                    <div className="w-12 h-12 bg-gray-100 flex items-center justify-center mb-6 text-black group-hover:bg-black group-hover:text-white transition-colors">
+                                        <Youtube className="w-6 h-6" />
+                                    </div>
+                                    <h3 className="font-bold text-black text-lg mb-2">YouTube Import</h3>
+                                    <p className="text-sm text-gray-500 leading-relaxed">Paste any URL and generate transcripts instantly using AI.</p>
+                                </div>
+                                <div className="p-8 bg-white border border-gray-200 hover:border-black transition-colors group">
+                                    <div className="w-12 h-12 bg-gray-100 flex items-center justify-center mb-6 text-black group-hover:bg-black group-hover:text-white transition-colors">
+                                        <Repeat className="w-6 h-6" />
+                                    </div>
+                                    <h3 className="font-bold text-black text-lg mb-2">Smart Looping</h3>
+                                    <p className="text-sm text-gray-500 leading-relaxed">Select any sentence to loop perfectly for shadowing practice.</p>
+                                </div>
+                                <div className="p-8 bg-white border border-gray-200 hover:border-black transition-colors group">
+                                    <div className="w-12 h-12 bg-gray-100 flex items-center justify-center mb-6 text-black group-hover:bg-black group-hover:text-white transition-colors">
+                                        <Database className="w-6 h-6" />
+                                    </div>
+                                    <h3 className="font-bold text-black text-lg mb-2">Cloud Sync</h3>
+                                    <p className="text-sm text-gray-500 leading-relaxed">Sign in to save your library and access it anywhere.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                    
+                    <footer className="py-8 text-center text-gray-400 text-xs border-t border-gray-100">
+                        © 2024 LingoMate AI. Powered by Google Gemini.
+                    </footer>
+                </div>
+            )
+        }
+
+        const SmartPlayer = ({ source, isPlaying, setIsPlaying, seekTime, onTimeUpdate, loopRange }) => {
+            const videoRef = useRef(null);
+            const playerRef = useRef(null);
+            const [youtubeReady, setYoutubeReady] = useState(false);
+
+            // File Player Sync
+            useEffect(() => {
+                if (source?.type === 'file' && videoRef.current) {
+                    if (Math.abs(videoRef.current.currentTime - seekTime) > 0.5) {
+                        videoRef.current.currentTime = seekTime;
+                    }
+                    if (isPlaying) videoRef.current.play().catch(() => setIsPlaying(false));
+                    else videoRef.current.pause();
+                }
+            }, [seekTime, isPlaying, source]);
+
+            // YouTube API Load
+            useEffect(() => {
+                if (source?.type === 'youtube') {
+                    if (!window.YT) {
+                        const tag = document.createElement('script');
+                        tag.src = "https://www.youtube.com/iframe_api";
+                        const firstScriptTag = document.getElementsByTagName('script')[0];
+                        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+                        window.onYouTubeIframeAPIReady = () => setYoutubeReady(true);
+                    } else {
+                        setYoutubeReady(true);
+                    }
+                }
+            }, [source]);
+
+            // YouTube Player Init
+            useEffect(() => {
+                if (youtubeReady && source?.type === 'youtube' && !playerRef.current) {
+                    playerRef.current = new window.YT.Player('youtube-player', {
+                        height: '100%',
+                        width: '100%',
+                        videoId: source.url,
+                        playerVars: { 'playsinline': 1, 'controls': 0, 'rel': 0 },
+                        events: {
+                            'onStateChange': (event) => {
+                                if (event.data === window.YT.PlayerState.PLAYING) setIsPlaying(true);
+                                if (event.data === window.YT.PlayerState.PAUSED) setIsPlaying(false);
+                            }
+                        }
+                    });
+                } else if (playerRef.current && source?.type === 'youtube') {
+                     const currentId = playerRef.current.getVideoData?.()?.video_id;
+                     if(currentId !== source.url) {
+                        playerRef.current.loadVideoById(source.url);
+                     }
+                }
+            }, [youtubeReady, source]);
+
+            // YouTube Player Sync
+            useEffect(() => {
+                if (source?.type === 'youtube' && playerRef.current?.seekTo) {
+                    const current = playerRef.current.getCurrentTime();
+                    if (Math.abs(current - seekTime) > 0.5) {
+                        playerRef.current.seekTo(seekTime, true);
+                    }
+                    const state = playerRef.current.getPlayerState();
+                    if (isPlaying && state !== 1) playerRef.current.playVideo();
+                    if (!isPlaying && state === 1) playerRef.current.pauseVideo();
+                }
+            }, [seekTime, isPlaying]);
+
+            // Time Update Loop
+            useEffect(() => {
+                let interval;
+                const sync = () => {
+                    let time = 0;
+                    if (source?.type === 'file' && videoRef.current) {
+                        time = videoRef.current.currentTime;
+                    } else if (source?.type === 'youtube' && playerRef.current?.getCurrentTime) {
+                        time = playerRef.current.getCurrentTime();
+                    }
+                    onTimeUpdate(time);
+                };
+
+                if (isPlaying) {
+                    interval = setInterval(sync, 100);
+                }
+                return () => clearInterval(interval);
+            }, [isPlaying, source]);
+
+            return (
+                <div className="relative aspect-video bg-black overflow-hidden shadow-none ring-1 ring-gray-200">
+                    {source?.type === 'file' ? (
+                        <video 
+                            ref={videoRef} 
+                            src={source.url} 
+                            className="w-full h-full object-contain"
+                            onEnded={() => setIsPlaying(false)}
+                            playsInline
+                        />
+                    ) : source?.type === 'youtube' ? (
+                        <div id="youtube-player" className="w-full h-full pointer-events-none" /> 
+                    ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-500 bg-gray-100">
+                            <div className="text-center">
+                                <Play className="w-12 h-12 mx-auto mb-2 opacity-20 text-black" />
+                                <p className="text-xs font-mono uppercase tracking-widest text-gray-400">Media Player Ready</p>
+                            </div>
+                        </div>
+                    )}
+                    {loopRange && (
+                        <div className="absolute top-4 right-4 bg-white text-black border border-black px-3 py-1 text-xs font-bold flex items-center gap-1 shadow-sm z-10">
+                            <Repeat className="w-3 h-3" /> LOOP ACTIVE
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [view, setView] = useState('landing'); // 'landing' | 'app'
+            const [isLoginOpen, setIsLoginOpen] = useState(false);
+            const [sidebarOpen, setSidebarOpen] = useState(true);
+            const [source, setSource] = useState(null);
+            const [transcript, setTranscript] = useState([]);
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [currentTime, setCurrentTime] = useState(0);
+            const [seekTrigger, setSeekTrigger] = useState(0);
+            const [loopRange, setLoopRange] = useState(null);
+            const [history, setHistory] = useState([]);
+            const [isProcessing, setIsProcessing] = useState(false);
+            const [contextPrompt, setContextPrompt] = useState("");
+            const [inputUrl, setInputUrl] = useState("");
+            const activeSegmentRef = useRef(null);
+
+            // Auth Check
+            useEffect(() => {
+                if (!isSupabaseConfigured) return;
+                
+                const checkUser = async () => {
+                    const { data } = await supabase.auth.getUser();
+                    if (data.user) {
+                        setUser(data.user);
+                        setView('app'); // Auto-redirect to app if user found
+                    }
+                };
+                checkUser();
+                
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+                    const currentUser = session?.user ?? null;
+                    setUser(currentUser);
+                    if (currentUser) setView('app'); // Redirect on login
+                });
+                
+                return () => subscription.unsubscribe();
+            }, []);
+
+            // Fetch History
+            useEffect(() => {
+                if (user && isSupabaseConfigured && view === 'app') fetchHistory();
+            }, [user, view]);
+
+            const fetchHistory = async () => {
+                const { data, error } = await supabase
+                    .from('transcripts')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+                if (data) setHistory(data);
+            };
+
+            const handleLogin = async (email, password, mode) => {
+                if (!isSupabaseConfigured) {
+                    alert("Supabase not configured. Please edit the HTML file.");
+                    return;
+                }
+                
+                let error = null;
+                if (mode === 'signup') {
+                    const { error: signUpError } = await supabase.auth.signUp({ email, password });
+                    error = signUpError;
+                    if (!error) alert("Account created! You may need to verify your email depending on Supabase settings, or just sign in.");
+                } else {
+                    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+                    error = signInError;
+                }
+
+                if (error) {
+                    alert(error.message);
+                } else {
+                    setIsLoginOpen(false);
+                    setView('app'); // Navigate to app on success
+                }
+            };
+
+            const handleLogout = async () => {
+                await supabase.auth.signOut();
+                setUser(null);
+                setHistory([]);
+                setView('landing'); // Go back to landing page on logout
+            };
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const url = URL.createObjectURL(file);
+                setSource({ type: 'file', url, title: file.name, originalUrl: null });
+                setTranscript([]);
+                setIsPlaying(false);
+            };
+
+            const handleYoutubeLoad = (e) => {
+                e.preventDefault();
+                const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+                const match = inputUrl.match(regExp);
+                const id = (match && match[2].length === 11) ? match[2] : null;
+                if (id) {
+                    setSource({ type: 'youtube', url: id, title: `YouTube Video`, originalUrl: inputUrl });
+                    setTranscript([]);
+                    setIsPlaying(false);
+                } else {
+                    alert("Invalid YouTube URL");
+                }
+            };
+
+            const handleGenerate = async () => {
+                if (!source) return;
+                setIsProcessing(true);
+                
+                const result = await generateTranscript(source.type, source.originalUrl, contextPrompt || source.title);
+                
+                setTranscript(result);
+                setIsProcessing(false);
+                
+                // Save to DB if logged in and valid result
+                if (user && result && result.length > 0 && result[0].speaker !== "System" && isSupabaseConfigured) {
+                    await supabase.from('transcripts').insert([{
+                        user_id: user.id,
+                        title: source.title || 'Untitled Session',
+                        source_type: source.type,
+                        source_url: source.originalUrl || 'Local File',
+                        content: result 
+                    }]);
+                    fetchHistory();
+                }
+            };
+
+            const loadSession = (item) => {
+                setTranscript(item.content);
+                if (item.source_type === 'youtube') {
+                    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+                    const match = item.source_url.match(regExp);
+                    const id = (match && match[2].length === 11) ? match[2] : null;
+                    setSource({ type: 'youtube', url: id, title: item.title, originalUrl: item.source_url });
+                } else {
+                    setSource({ type: 'file', url: null, title: item.title });
+                    alert("For local files, please re-upload the video/audio file to play.");
+                }
+            };
+
+            const handleTimeUpdate = (time) => {
+                setCurrentTime(time);
+                if (loopRange && isPlaying) {
+                    if (time >= loopRange.end) {
+                        setSeekTrigger(loopRange.start);
+                    }
+                }
+            };
+
+            const activeIndex = transcript.findIndex(s => currentTime >= s.start && currentTime < s.end);
+
+            useEffect(() => {
+                if (activeSegmentRef.current && isPlaying) {
+                    activeSegmentRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, [activeIndex, isPlaying]);
+
+            // VIEW ROUTING
+            if (view === 'landing') {
+                return (
+                    <>
+                        <LandingPage 
+                            onLoginClick={() => setIsLoginOpen(true)} 
+                            onGuestClick={() => setView('app')} 
+                        />
+                        <LoginModal 
+                            isOpen={isLoginOpen} 
+                            onClose={() => setIsLoginOpen(false)} 
+                            onLogin={handleLogin} 
+                        />
+                    </>
+                );
+            }
+
+            return (
+                <div className="h-full flex flex-col font-sans text-gray-900 bg-white fade-in">
+                    <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} onLogin={handleLogin} />
+                    
+                    {/* Header */}
+                    <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center z-20 shadow-none flex-shrink-0">
+                        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView('landing')}>
+                            <div className="bg-black p-2 rounded-none">
+                                <Volume2 className="text-white w-5 h-5" />
+                            </div>
+                            <h1 className="text-xl font-bold text-black tracking-tight">
+                                LingoMate <span className="text-xs text-white font-semibold ml-2 bg-black px-2 py-0.5 rounded-none">AI</span>
+                            </h1>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            {!isSupabaseConfigured && (
+                                <span className="text-xs text-gray-500 bg-gray-100 px-3 py-1 border border-gray-200 flex items-center gap-1 font-mono">
+                                    <AlertCircle className="w-3 h-3" /> Setup Needed
+                                </span>
+                            )}
+                            {user ? (
+                                <div className="flex items-center gap-3 border border-gray-200 pl-3 pr-2 py-1.5 rounded-none">
+                                    <span className="text-sm font-medium text-gray-900">{user.email?.split('@')[0]}</span>
+                                    <button onClick={handleLogout} className="bg-gray-100 p-1.5 hover:bg-black hover:text-white transition-colors" title="Log out"><LogOut className="w-4 h-4" /></button>
+                                </div>
+                            ) : (
+                                <button onClick={() => setIsLoginOpen(true)} className="flex items-center gap-2 px-5 py-2 bg-black text-white hover:bg-gray-800 transition-all text-sm font-bold shadow-sm">
+                                    <User className="w-4 h-4" /> Sign In
+                                </button>
+                            )}
+                        </div>
+                    </header>
+
+                    {/* Main Content */}
+                    <div className="flex-1 flex overflow-hidden">
+                        {/* Sidebar */}
+                        <aside className={`${sidebarOpen ? 'w-80' : 'w-0'} bg-white border-r border-gray-200 transition-all duration-300 overflow-hidden flex flex-col`}>
+                            <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                                <h2 className="font-bold text-gray-900 flex items-center gap-2 text-sm uppercase tracking-wide"><History className="w-4 h-4" /> Library</h2>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-white">
+                                {!user && (
+                                    <div className="text-center p-8 text-gray-400 text-sm flex flex-col items-center">
+                                        <Database className="w-8 h-8 mb-2 opacity-20 text-black" />
+                                        Sign in to save transcripts.
+                                    </div>
+                                )}
+                                {user && history.length === 0 && (
+                                    <div className="text-center p-8 text-gray-400 text-sm">No saved sessions yet.</div>
+                                )}
+                                {user && history.map(item => (
+                                    <div key={item.id} onClick={() => loadSession(item)} className="p-3 rounded-none border border-gray-200 hover:border-black hover:bg-gray-50 cursor-pointer transition-all group">
+                                        <h3 className="font-bold text-gray-900 text-sm truncate">{item.title}</h3>
+                                        <div className="flex justify-between items-center mt-2">
+                                            <span className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 uppercase tracking-wide">{item.source_type}</span>
+                                            <span className="text-[10px] text-gray-400 font-mono">{new Date(item.created_at).toLocaleDateString()}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </aside>
+
+                        {/* Center Panel (Player) */}
+                        <main className="flex-1 flex flex-col md:flex-row min-w-0">
+                            <div className="flex-[3] flex flex-col bg-gray-50 border-r border-gray-200 overflow-y-auto custom-scrollbar">
+                                <div className="p-2 sticky top-0 z-10">
+                                    <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 bg-white border border-gray-200 hover:border-black rounded-none text-gray-600 shadow-sm transition-all">
+                                        {sidebarOpen ? <ChevronLeft className="w-5 h-5"/> : <ChevronRight className="w-5 h-5"/>}
+                                    </button>
+                                </div>
+                                
+                                <div className="px-6 pb-6 max-w-4xl mx-auto w-full flex flex-col gap-6">
+                                    {!source && (
+                                        <div className="grid md:grid-cols-2 gap-6 mt-10">
+                                            <div className="bg-white p-8 border border-gray-200 flex flex-col items-center text-center hover:border-black transition-all duration-300 group">
+                                                <div className="w-16 h-16 bg-gray-100 flex items-center justify-center mb-6 group-hover:bg-black group-hover:text-white transition-colors text-black"><Upload className="w-8 h-8" /></div>
+                                                <h3 className="font-bold text-xl mb-2 text-black">Upload File</h3>
+                                                <p className="text-gray-500 text-sm mb-8">Support for MP4 video or MP3 audio files.</p>
+                                                <label className="bg-black text-white px-8 py-3 font-bold cursor-pointer hover:bg-gray-800 transition-all w-full text-sm uppercase tracking-wide">
+                                                    Select File
+                                                    <input type="file" className="hidden" accept="video/*,audio/*" onChange={handleFileUpload} />
+                                                </label>
+                                            </div>
+                                            <div className="bg-white p-8 border border-gray-200 flex flex-col items-center text-center hover:border-black transition-all duration-300 group">
+                                                <div className="w-16 h-16 bg-gray-100 flex items-center justify-center mb-6 group-hover:bg-black group-hover:text-white transition-colors text-black"><Youtube className="w-8 h-8" /></div>
+                                                <h3 className="font-bold text-xl mb-2 text-black">YouTube Link</h3>
+                                                <p className="text-gray-500 text-sm mb-8">Paste a direct YouTube video URL.</p>
+                                                <form onSubmit={handleYoutubeLoad} className="w-full flex gap-2">
+                                                    <input className="flex-1 px-4 py-3 border border-gray-200 text-sm focus:border-black focus:ring-0 outline-none transition-all placeholder-gray-400 bg-gray-50" placeholder="https://youtube.com/..." value={inputUrl} onChange={e => setInputUrl(e.target.value)} />
+                                                    <button type="submit" className="bg-black hover:bg-gray-800 text-white px-6 font-bold transition-colors text-sm uppercase">Go</button>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {source && (
+                                        <div className="space-y-4 fade-in">
+                                            <div className="flex justify-between items-center border-b border-gray-200 pb-2">
+                                                <h2 className="font-bold text-lg truncate text-gray-900">{source.title}</h2>
+                                                <button onClick={() => setSource(null)} className="text-xs text-red-600 hover:text-white hover:bg-red-600 px-3 py-1 transition-colors font-bold uppercase tracking-wider border border-transparent hover:border-red-600">Close</button>
+                                            </div>
+
+                                            <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={seekTrigger} onTimeUpdate={handleTimeUpdate} loopRange={loopRange} />
+
+                                            <div className="bg-white p-4 border border-gray-200 flex items-center justify-between">
+                                                <div className="flex items-center gap-6">
+                                                    <button onClick={() => setSeekTrigger(c => Math.max(0, currentTime - 5))} className="p-3 hover:bg-gray-100 text-black transition-colors tooltip border border-transparent hover:border-gray-300" title="-5s"><RotateCcw className="w-5 h-5" /></button>
+                                                    <button onClick={() => setIsPlaying(!isPlaying)} className="w-12 h-12 flex items-center justify-center bg-black text-white hover:bg-gray-800 transition-all shadow-md">
+                                                        {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-1" />}
+                                                    </button>
+                                                    <button onClick={() => setSeekTrigger(c => currentTime + 5)} className="p-3 hover:bg-gray-100 text-black transition-colors border border-transparent hover:border-gray-300" title="+5s"><RotateCcw className="w-5 h-5 scale-x-[-1]" /></button>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    {loopRange ? 
+                                                        <button onClick={() => setLoopRange(null)} className="flex items-center gap-2 px-4 py-2 bg-black text-white text-xs font-bold hover:bg-gray-800 transition-colors animate-pulse">
+                                                            <X className="w-4 h-4" /> Stop Loop
+                                                        </button> : 
+                                                        <span className="text-xs text-gray-400 font-mono uppercase tracking-wide">Tap transcript to loop</span>
+                                                    }
+                                                </div>
+                                            </div>
+
+                                            {transcript.length === 0 && (
+                                                <div className="bg-white border border-gray-200 p-8 flex flex-col items-center text-center">
+                                                    <div className="bg-gray-100 p-3 mb-4 rounded-full">
+                                                        <Sparkles className="w-6 h-6 text-black" />
+                                                    </div>
+                                                    <h3 className="font-bold text-gray-900 text-lg mb-2">Generate AI Transcript</h3>
+                                                    <p className="text-sm text-gray-500 mb-6 max-w-md">Use Gemini 2.0 to listen to the audio and create a synchronized, interactive script.</p>
+                                                    <div className="flex gap-2 w-full max-w-lg bg-gray-50 p-2 border border-gray-200">
+                                                        <input 
+                                                            placeholder="Context (e.g. 'French cooking lesson')" 
+                                                            className="flex-1 px-4 py-2 bg-white border border-gray-200 focus:border-black focus:ring-0 outline-none text-sm placeholder-gray-400" 
+                                                            value={contextPrompt} 
+                                                            onChange={e => setContextPrompt(e.target.value)} 
+                                                        />
+                                                        <button 
+                                                            onClick={handleGenerate} 
+                                                            disabled={isProcessing} 
+                                                            className="bg-black text-white px-6 py-2 font-bold hover:bg-gray-800 disabled:opacity-70 flex items-center gap-2 transition-all text-sm uppercase tracking-wide"
+                                                        >
+                                                            {isProcessing ? <Loader2 className="animate-spin w-4 h-4"/> : "Generate"}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Transcript Panel */}
+                            <div className="flex-[2] bg-white flex flex-col border-l border-gray-200 h-full overflow-hidden shadow-none z-10">
+                                <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 sticky top-0 z-20">
+                                    <h3 className="font-bold text-gray-900 flex items-center gap-2 text-sm uppercase tracking-wide"><FileText className="w-4 h-4" /> Transcript</h3>
+                                    {transcript.length > 0 && <span className="text-[10px] font-bold bg-white text-black px-2 py-1 border border-gray-300 font-mono">{transcript.length} SEGMENTS</span>}
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-4 space-y-4 relative bg-white">
+                                    {transcript.length === 0 ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-gray-300 space-y-3">
+                                            <FileText className="w-12 h-12 opacity-20" />
+                                            <p className="text-sm font-medium text-gray-400">No transcript available.</p>
+                                        </div>
+                                    ) : (
+                                        transcript.map((line, idx) => {
+                                            const isActive = idx === activeIndex;
+                                            const isLooping = loopRange?.start === line.start;
+                                            return (
+                                                <div 
+                                                    key={idx} 
+                                                    ref={isActive ? activeSegmentRef : null} 
+                                                    onClick={() => { setSeekTrigger(line.start); setIsPlaying(true); }} 
+                                                    className={`
+                                                        p-5 cursor-pointer transition-all duration-200 border-l-[4px] group relative
+                                                        ${isActive 
+                                                            ? 'bg-gray-50 border-black shadow-none' 
+                                                            : 'bg-white border-transparent hover:bg-gray-50 hover:border-gray-300'
+                                                        }
+                                                    `}
+                                                >
+                                                    <div className="flex justify-between items-center mb-2">
+                                                        <span className={`text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 font-mono ${isActive ? 'text-black' : 'text-gray-400'}`}>
+                                                            {line.speaker || 'Speaker'} 
+                                                            <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                                                            {new Date(line.start * 1000).toISOString().substr(14, 5)}
+                                                        </span>
+                                                        <button 
+                                                            onClick={(e) => { e.stopPropagation(); setLoopRange(isLooping ? null : { start: line.start, end: line.end }); }} 
+                                                            className={`p-1.5 transition-all ${isLooping ? 'bg-black text-white' : 'bg-gray-100 text-gray-400 hover:text-black hover:bg-gray-200 opacity-0 group-hover:opacity-100'}`} 
+                                                            title="Loop this segment"
+                                                        >
+                                                            <Repeat className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
+                                                    <p className={`text-[15px] leading-relaxed ${isActive ? 'text-black font-semibold' : 'text-gray-600 font-light'}`}>
+                                                        {line.text}
+                                                    </p>
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                            </div>
+                        </main>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
