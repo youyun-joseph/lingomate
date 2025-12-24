@@ -1,6 +1,5 @@
 // Follow this setup guide to integrate the Deno language server with your editor:
-// [https://deno.land/manual/getting_started/setup_your_environment](https://deno.land/manual/getting_started/setup_your_environment)
-// This enables autocomplete, go to definition, etc.
+// https://deno.land/manual/getting_started/setup_your_environment
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,24 +13,32 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { sourceType, sourceUrl, contextText } = await req.json()
     const apiKey = Deno.env.get('GEMINI_API_KEY')
-
     if (!apiKey) {
         throw new Error('GEMINI_API_KEY is not set in Supabase secrets.')
     }
 
+    // Parse Body safely
+    let body;
+    try {
+      body = await req.json();
+    } catch (e) {
+      throw new Error("Invalid JSON body received.");
+    }
+    
+    const { sourceType, sourceUrl, contextText } = body;
+
     const prompt = `
       You are a professional transcription engine.
-      Generate a REALISTIC, TIMESTAMPED transcript based on this context: "${contextText}".
-      Source URL: ${sourceUrl}
+      Generate a REALISTIC, TIMESTAMPED transcript based on this context: "${contextText || 'General content'}".
+      Source URL: ${sourceUrl || 'Unknown'}
       
       Output STRICT JSON format only. No markdown.
       Schema: Array<{ text: string, start: number, end: number, speaker: string }>
     `
 
-    // Use gemini-1.5-flash for stability
-    console.log("Calling Gemini API...")
+    console.log("Calling Gemini 1.5 Flash API...");
+    
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
@@ -46,13 +53,12 @@ Deno.serve(async (req) => {
     if (!response.ok) {
         const errorText = await response.text()
         console.error("Gemini API Error Response:", errorText)
-        throw new Error(`Gemini API returned ${response.status}: ${errorText}`)
+        throw new Error(`Google API returned ${response.status}: ${errorText}`)
     }
 
     const data = await response.json()
-    console.log("Gemini API Data Received")
-
-    // Check if Google returned an error structure
+    
+    // Check if Google returned an error structure inside 200 OK
     if (data.error) {
       throw new Error(`Google API Error: ${data.error.message || JSON.stringify(data.error)}`)
     }
@@ -61,11 +67,12 @@ Deno.serve(async (req) => {
     
     if (!text) {
        console.error("Full Data Object:", JSON.stringify(data))
-       throw new Error('No text generated from Gemini. Check logs for full object.')
+       throw new Error('No text generated from Gemini. Check logs for details.')
     }
 
     // Clean markdown if Gemini adds it
     const jsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim()
+    
     let transcript
     try {
         transcript = JSON.parse(jsonStr)
@@ -81,10 +88,10 @@ Deno.serve(async (req) => {
 
   } catch (error) {
     console.error("Edge Function Caught Error:", error.message)
+    // Return 200 with error field so client can read message without throwing generic HTTP error
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 })
-
