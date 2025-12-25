@@ -77,50 +77,56 @@
                     const filePart = await fileToGenerativePart(fileObject);
                     parts = [
                         filePart,
-                        { text: `Transcribe this audio/video faithfully and accurately. 
+                        { text: `Transcribe this audio/video faithfully. 
                                  Context: "${contextText || 'No specific context'}".
-                                 Output STRICT JSON format only. No markdown.
-                                 Schema: Array<{ text: string, start: number, end: number, speaker: string }>
-                                 IMPORTANT: 'start' and 'end' must be timestamps in SECONDS (float, e.g. 0.5, 12.4).
-                                 Ensure timestamps are EXTREMELY ACCURATE to the spoken words in the media.
-                                 Do not drift over time.
-                                 Ensure timestamps increase logically and cover the content.` }
+                                 Identify speakers if possible.
+                                 Ensure timestamps are extremely accurate to the audio provided.` }
                     ];
                 } catch (e) {
                     console.error("Error processing file:", e);
                     throw new Error("Failed to process file for upload.");
                 }
             } else {
-                // SIMULATION (YouTube/URL): Fallback since we can't fetch YouTube media client-side
+                // SIMULATION (YouTube/URL)
                 parts = [{ text: `
                     You are a professional transcription engine.
                     Generate a REALISTIC, TIMESTAMPED transcript based on this context: "${contextText || 'General content'}".
                     Source URL: ${sourceUrl || 'Unknown'}
-                    
-                    NOTE: Since I cannot access the external URL's media stream directly, create a PLAUSIBLE simulation of what this video might contain based on the title and context.
-                    
-                    Output STRICT JSON format only. No markdown.
-                    Schema: Array<{ text: string, start: number, end: number, speaker: string }>
-                    IMPORTANT: 'start' and 'end' must be timestamps in SECONDS (float).
-                    Ensure timestamps increase logically.
+                    NOTE: Create a PLAUSIBLE simulation of what this video might contain.
                 ` }];
             }
 
             try {
+                // Using Gemini 1.5 Flash with Structured Outputs for better stability
                 const response = await fetch(
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            contents: [{ parts: parts }]
+                            contents: [{ parts: parts }],
+                            generationConfig: {
+                                responseMimeType: "application/json",
+                                responseSchema: {
+                                    type: "ARRAY",
+                                    items: {
+                                        type: "OBJECT",
+                                        properties: {
+                                            text: { type: "STRING" },
+                                            start: { type: "NUMBER" },
+                                            end: { type: "NUMBER" },
+                                            speaker: { type: "STRING" }
+                                        },
+                                        required: ["text", "start", "end"]
+                                    }
+                                }
+                            }
                         })
                     }
                 );
 
                 if (!response.ok) {
                    const errText = await response.text();
-                   // Parse error object if possible to get clearer message
                    try {
                        const errObj = JSON.parse(errText);
                        throw new Error(`API Error: ${errObj.error?.message || response.statusText}`);
@@ -134,6 +140,8 @@
                 
                 if (!text) throw new Error("No text generated.");
 
+                // With responseMimeType="application/json", we usually get raw JSON without markdown fences
+                // But we handle both just in case
                 const jsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
                 return JSON.parse(jsonStr);
 
