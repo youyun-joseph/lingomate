@@ -43,11 +43,9 @@
 
         // --- UTILS ---
         const sanitizeFilename = (filename) => {
-            // Replaces all special characters, spaces, and non-latin symbols with underscores
-            // This prevents "Invalid Key" errors in Supabase/S3 storage buckets.
             return filename
                 .replace(/[^a-z0-9.]/gi, '_')
-                .replace(/_+/g, '_'); // Collapse multiple underscores
+                .replace(/_+/g, '_');
         };
 
         // --- GEMINI HELPER ---
@@ -71,7 +69,12 @@
                 const filePart = await fileToGenerativePart(fileObject);
                 parts = [
                     filePart,
-                    { text: `Transcribe this audio/video faithfully. Context: "${contextText || 'No specific context'}". Output strictly in JSON format. Schema: Array of objects with text, start, end, speaker. Ensure timestamps are floats in seconds and extremely accurate.` }
+                    { text: `Transcribe this audio/video faithfully and completely. 
+                             Context: "${contextText || 'No specific context'}". 
+                             Output strictly in JSON format. 
+                             Schema: Array of objects with text, start, end, speaker. 
+                             IMPORTANT: Ensure timestamps are extremely accurate, expressed in seconds (floats), and cover the ENTIRE duration from 0.0 to the very end of the file. 
+                             Do not truncate or summarize the end.` }
                 ];
             } else {
                 throw new Error("No media file provided for analysis.");
@@ -86,6 +89,7 @@
                         body: JSON.stringify({
                             contents: [{ parts: parts }],
                             generationConfig: {
+                                temperature: 0, // Ensure precise, non-creative timing
                                 responseMimeType: "application/json",
                                 responseSchema: {
                                     type: "ARRAY",
@@ -138,8 +142,8 @@
                         <h2 className="text-xl font-bold text-black mb-2 tracking-tight">{title}</h2>
                         <p className="text-sm text-gray-500 mb-6">{message}</p>
                         <div className="flex gap-4">
-                            <button onClick={onCancel} className="flex-1 px-4 py-2 border border-black font-semibold hover:bg-gray-50 text-sm rounded-xl transition-colors">Cancel</button>
-                            <button onClick={onConfirm} className="flex-1 px-4 py-2 bg-black text-white font-semibold hover:bg-gray-800 text-sm rounded-xl transition-colors">Replace</button>
+                            <button onClick={onCancel} className="flex-1 px-4 py-2 border border-black font-semibold hover:bg-gray-50 text-sm rounded-xl">Cancel</button>
+                            <button onClick={onConfirm} className="flex-1 px-4 py-2 bg-black text-white font-semibold hover:bg-gray-800 text-sm rounded-xl">Replace</button>
                         </div>
                     </div>
                 </div>
@@ -164,7 +168,7 @@
                             <KeyRound className="absolute left-3 top-3.5 w-4 h-4 text-gray-400" />
                             <input type="password" className="w-full pl-10 pr-4 py-3 border border-gray-300 focus:border-black focus:ring-0 outline-none transition-all text-sm font-mono rounded-xl" value={keyInput} onChange={e => setKeyInput(e.target.value)} placeholder="AIzaSy..." />
                         </div>
-                        <div className="flex justify-end"><button onClick={handleSave} disabled={isSaving} className="bg-black text-white px-6 py-2.5 font-bold hover:bg-gray-800 text-sm flex items-center gap-2 rounded-xl transition-colors"> {isSaving && <Spinner />} Save settings</button></div>
+                        <div className="flex justify-end"><button onClick={handleSave} disabled={isSaving} className="bg-black text-white px-6 py-2.5 font-bold hover:bg-gray-800 text-sm flex items-center gap-2 rounded-xl"> {isSaving && <Spinner />} Save settings</button></div>
                     </div>
                 </div>
             );
@@ -184,7 +188,7 @@
                         <form onSubmit={handleSubmit} className="space-y-5">
                             <input type="email" required className="w-full px-4 py-3 border border-gray-300 focus:border-black outline-none text-sm rounded-xl" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" />
                             <input type="password" required className="w-full px-4 py-3 border border-gray-300 focus:border-black outline-none text-sm rounded-xl" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" />
-                            <button type="submit" disabled={loading} className="w-full bg-black text-white py-3.5 font-bold hover:bg-gray-800 flex justify-center disabled:opacity-70 rounded-xl transition-colors">{loading ? <Spinner /> : (mode === 'signin' ? "Sign in" : "Create account")}</button>
+                            <button type="submit" disabled={loading} className="w-full bg-black text-white py-3.5 font-bold hover:bg-gray-800 flex justify-center disabled:opacity-70 rounded-xl">{loading ? <Spinner /> : (mode === 'signin' ? "Sign in" : "Create account")}</button>
                         </form>
                         <div className="mt-6 text-center border-t pt-4 font-medium"><button onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')} className="text-sm text-black hover:underline">{mode === 'signin' ? "New here? Create account" : "Sign in instead"}</button></div>
                         <button onClick={onClose} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-black"><X className="w-5 h-5" /></button>
@@ -205,7 +209,7 @@
                         </div>
                         <div className="flex gap-4">
                             <button onClick={onLoginClick} className="px-5 py-2 text-sm font-medium text-gray-600 hover:text-black transition-colors">Sign in</button>
-                            <button onClick={onGuestClick} className="px-5 py-2 text-sm font-bold text-white bg-black hover:bg-gray-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)] border border-black rounded-full transition-all">Try demo</button>
+                            <button onClick={onGuestClick} className="px-5 py-2 text-sm font-bold text-white bg-black hover:bg-gray-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)] border border-black rounded-full">Try demo</button>
                         </div>
                     </nav>
 
@@ -224,10 +228,10 @@
                             </p>
                             
                             <div className="flex flex-col sm:flex-row gap-6 justify-center items-center">
-                                <button onClick={onLoginClick} className="w-full sm:w-auto px-10 py-5 bg-black text-white font-bold text-lg hover:bg-gray-900 shadow-[8px_8px_0px_0px_rgba(209,213,219,1)] flex items-center justify-center gap-3 border border-black rounded-2xl transition-all">
+                                <button onClick={onLoginClick} className="w-full sm:w-auto px-10 py-5 bg-black text-white font-bold text-lg hover:bg-gray-900 shadow-[8px_8px_0px_0px_rgba(209,213,219,1)] flex items-center justify-center gap-3 border border-black rounded-2xl">
                                     Get started <ArrowRight className="w-6 h-6" />
                                 </button>
-                                <button onClick={onGuestClick} className="w-full sm:w-auto px-10 py-5 bg-white text-black border border-gray-200 font-bold text-lg hover:bg-gray-50 rounded-2xl transition-all">
+                                <button onClick={onGuestClick} className="w-full sm:w-auto px-10 py-5 bg-white text-black border border-gray-200 font-bold text-lg hover:bg-gray-50 rounded-2xl">
                                     Try guest
                                 </button>
                             </div>
@@ -374,19 +378,14 @@
                 if (!ek) { setIsSettingsOpen(true); return; }
                 setIsProcessing(true);
                 try {
-                    // 1. Generate AI Transcript
                     const result = await generateTranscript(ek, source.type, null, contextPrompt || source.title, source.fileData);
                     setTranscript(result);
                     
                     if (user?.id !== 'demo-user') {
-                        // 2. Upload to Supabase Storage
-                        // Re-sanitizing path aggressively to prevent "Invalid Key" errors
                         const sanitizedTitle = sanitizeFilename(source.title);
                         const timestamp = Date.now();
                         const filePath = `${user.id}/${timestamp}_${sanitizedTitle}`;
                         
-                        console.log(`Attempting upload to path: ${filePath}`);
-
                         const { data: uploadData, error: uploadError } = await supabase.storage
                             .from('media')
                             .upload(filePath, source.fileData, {
@@ -394,19 +393,10 @@
                                 upsert: true
                             });
                         
-                        if (uploadError) {
-                            console.error("Supabase Storage Error:", uploadError);
-                            // More descriptive alert for common storage issues
-                            if (uploadError.message.includes('Bucket not found')) {
-                                throw new Error("Bucket 'media' not found. Please ensure the bucket exists and RLS policies are configured in your Supabase dashboard.");
-                            }
-                            throw new Error(`Storage upload failed: ${uploadError.message}`);
-                        }
+                        if (uploadError) throw uploadError;
 
-                        // 3. Get Public URL
                         const { data: urlData } = supabase.storage.from('media').getPublicUrl(filePath);
                         
-                        // 4. Save Record to Database (using ORIGINAL title for library display)
                         await supabase.from('transcripts').upsert({
                             user_id: user.id,
                             title: source.title,
@@ -440,7 +430,12 @@
             };
 
             const formatTime = (s) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
-            const activeIndex = transcript.findIndex(s => currentTime >= s.start && currentTime < s.end);
+            
+            // Gap-resistant active index logic
+            const activeIndex = transcript.findIndex((s, idx) => {
+                const nextStart = transcript[idx + 1]?.start || Infinity;
+                return currentTime >= s.start && currentTime < nextStart;
+            });
 
             useEffect(() => { if (activeSegmentRef.current && isPlaying) activeSegmentRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, [activeIndex, isPlaying]);
 
@@ -473,7 +468,7 @@
                             <div className="flex-1 overflow-y-auto p-3 space-y-2">
                                 {history.length === 0 && <div className="text-center p-8 opacity-20"><Database className="w-8 h-8 mx-auto mb-2" /><p className="text-xs font-semibold tracking-normal">No files saved</p></div>}
                                 {history.map(item => (
-                                    <div key={item.id} onClick={() => loadSession(item)} className="p-3 border border-gray-100 hover:border-black rounded-2xl cursor-pointer group relative transition-all bg-white shadow-sm hover:shadow-md">
+                                    <div key={item.id} onClick={() => loadSession(item)} className="p-3 border border-gray-100 hover:border-black rounded-xl cursor-pointer group relative transition-all bg-white shadow-sm hover:shadow-md">
                                         <h3 className="font-bold text-xs truncate text-gray-800 pr-6">{item.title}</h3>
                                         <div className="flex justify-between items-center mt-2 opacity-50 text-[10px] font-medium"><span>{item.source_type}</span><span>{new Date(item.created_at).toLocaleDateString()}</span></div>
                                         <button onClick={(e) => deleteSession(e, item.id)} className="absolute top-2.5 right-2 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-black transition-opacity"><Trash2 className="w-3.5 h-3.5" /></button>
