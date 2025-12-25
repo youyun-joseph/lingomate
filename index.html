@@ -81,6 +81,8 @@
                                  Context: "${contextText || 'No specific context'}".
                                  Output STRICT JSON format only. No markdown.
                                  Schema: Array<{ text: string, start: number, end: number, speaker: string }>
+                                 IMPORTANT: 'start' and 'end' must be timestamps in SECONDS (float, e.g. 0.5, 12.4).
+                                 Ensure timestamps are accurate to the media provided.
                                  Ensure timestamps increase logically and cover the content.` }
                     ];
                 } catch (e) {
@@ -98,6 +100,7 @@
                     
                     Output STRICT JSON format only. No markdown.
                     Schema: Array<{ text: string, start: number, end: number, speaker: string }>
+                    IMPORTANT: 'start' and 'end' must be timestamps in SECONDS (float).
                     Ensure timestamps increase logically.
                 ` }];
             }
