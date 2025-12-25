@@ -82,17 +82,16 @@
                 const filePart = await fileToGenerativePart(fileObject);
                 parts = [
                     filePart,
-                    { text: `Transcribe this audio/video faithfully and word-for-word. 
-                             The total length of this media is exactly ${totalDuration.toFixed(2)} seconds.
-                             Context: "${contextText || 'No specific context'}". 
-                             Output strictly in JSON format. 
-                             Schema: Array of objects with text, start, end, speaker. 
-                             IMPORTANT: Timestamps must be extremely accurate. 
-                             NO TIMESTAMP SHOULD EXCEED ${totalDuration.toFixed(2)} SECONDS. 
-                             Ensure segments are chronological and cover the entire file from 0.0 to the end.` }
+                    { text: `Transcribe this audio/video faithfully. 
+                             CRITICAL: The audio is EXACTLY ${totalDuration.toFixed(2)} seconds long. 
+                             Do NOT generate any timestamp higher than ${totalDuration.toFixed(2)}. 
+                             Any words spoken at the very end must have an 'end' time of ${totalDuration.toFixed(2)}.
+                             Context: "${contextText || 'General content'}". 
+                             Output STRICT JSON format. 
+                             Schema: Array<{ text: string, start: number, end: number, speaker: string }>.` }
                 ];
             } else {
-                throw new Error("No media file provided for analysis.");
+                throw new Error("No media file provided.");
             }
 
             try {
@@ -104,7 +103,7 @@
                         body: JSON.stringify({
                             contents: [{ parts: parts }],
                             generationConfig: {
-                                temperature: 0, 
+                                temperature: 0,
                                 responseMimeType: "application/json",
                                 responseSchema: {
                                     type: "ARRAY",
@@ -126,18 +125,21 @@
 
                 if (!response.ok) {
                     const errText = await response.text();
-                    try {
-                        const errObj = JSON.parse(errText);
-                        throw new Error(`API error: ${errObj.error?.message || response.statusText}`);
-                    } catch(e) {
-                        throw new Error(`API error: ${response.status} - ${errText}`);
-                    }
+                    throw new Error(`API error: ${response.status}`);
                 }
 
                 const data = await response.json();
                 const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
                 if (!text) throw new Error("No transcript generated.");
-                return JSON.parse(text.replace(/```json/g, '').replace(/```/g, '').trim());
+                
+                const rawJson = JSON.parse(text.replace(/```json/g, '').replace(/```/g, '').trim());
+                
+                // POST-PROCESSING: Safety clamp for halluncinated timestamps
+                return rawJson.map(segment => ({
+                    ...segment,
+                    start: Math.min(Math.max(0, segment.start), totalDuration),
+                    end: Math.min(Math.max(segment.start + 0.1, segment.end), totalDuration)
+                }));
             } catch (err) {
                 console.error("AI generation error:", err);
                 throw err;
@@ -401,7 +403,6 @@
                 if (!ek) { setIsSettingsOpen(true); return; }
                 setIsProcessing(true);
                 try {
-                    // Pass the actual duration to prevent timestamp hallucination
                     const result = await generateTranscript(ek, source.type, null, contextPrompt || source.title, source.fileData, source.duration || 0);
                     setTranscript(result);
                     
@@ -455,7 +456,7 @@
 
             const formatTime = (s) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
             
-            // Gap-resistant active index logic
+            // Hallucination-resistant highlighting
             const activeIndex = transcript.findIndex((s, idx) => {
                 const nextStart = transcript[idx + 1]?.start || Infinity;
                 return currentTime >= s.start && currentTime < nextStart;
@@ -516,7 +517,7 @@
                                         <div className="space-y-6 fade-in pt-4">
                                             <div className="flex justify-between items-center border-b border-gray-200 pb-2">
                                                 <h2 className="font-bold text-lg text-gray-900 truncate">{source.title}</h2>
-                                                <button onClick={() => setSource(null)} className="text-xs font-bold text-red-600 hover:bg-red-50 px-3 py-1 rounded-lg transition-colors">Close</button>
+                                                <button onClick={() => setSource(null)} className="text-xs font-bold text-red-600 hover:bg-red-50 px-3 py-1 rounded-lg">Close</button>
                                             </div>
                                             <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={seekTrigger} onTimeUpdate={handleTimeUpdate} loopRange={loopRange} />
                                             <div className="bg-white border border-gray-100 p-5 flex items-center justify-between rounded-3xl shadow-sm">
