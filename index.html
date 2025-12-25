@@ -77,12 +77,13 @@
                     const filePart = await fileToGenerativePart(fileObject);
                     parts = [
                         filePart,
-                        { text: `Transcribe this audio/video faithfully. 
+                        { text: `Transcribe this audio/video faithfully and accurately. 
                                  Context: "${contextText || 'No specific context'}".
                                  Output STRICT JSON format only. No markdown.
                                  Schema: Array<{ text: string, start: number, end: number, speaker: string }>
                                  IMPORTANT: 'start' and 'end' must be timestamps in SECONDS (float, e.g. 0.5, 12.4).
-                                 Ensure timestamps are accurate to the media provided.
+                                 Ensure timestamps are EXTREMELY ACCURATE to the spoken words in the media.
+                                 Do not drift over time.
                                  Ensure timestamps increase logically and cover the content.` }
                     ];
                 } catch (e) {
@@ -707,6 +708,12 @@
                 }
             };
 
+            const formatTime = (seconds) => {
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
+            };
+
             const activeIndex = transcript.findIndex(s => currentTime >= s.start && currentTime < s.end);
 
             useEffect(() => {
@@ -860,6 +867,11 @@
                                                     </button>
                                                     <button onClick={() => setSeekTrigger(c => currentTime + 5)} className="p-3 hover:bg-gray-100 text-black transition-colors border border-transparent hover:border-gray-300" title="+5s"><RotateCcw className="w-5 h-5 scale-x-[-1]" /></button>
                                                 </div>
+                                                
+                                                <div className="font-mono text-sm font-medium text-gray-600 tracking-wider">
+                                                    {formatTime(currentTime)}
+                                                </div>
+
                                                 <div className="flex items-center gap-2">
                                                     {loopRange ? 
                                                         <button onClick={() => setLoopRange(null)} className="flex items-center gap-2 px-4 py-2 bg-black text-white text-xs font-bold hover:bg-gray-800 transition-colors animate-pulse">
