@@ -41,6 +41,15 @@
 
         const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        // --- UTILS ---
+        const sanitizeFilename = (filename) => {
+            // Replaces all special characters, spaces, and non-latin symbols with underscores
+            // This prevents "Invalid Key" errors in Supabase/S3 storage buckets.
+            return filename
+                .replace(/[^a-z0-9.]/gi, '_')
+                .replace(/_+/g, '_'); // Collapse multiple underscores
+        };
+
         // --- GEMINI HELPER ---
         const fileToGenerativePart = async (file) => {
             const base64EncodedDataPromise = new Promise((resolve) => {
@@ -124,13 +133,13 @@
             if (!isOpen) return null;
             return (
                 <div className="fixed inset-0 bg-white/80 flex items-center justify-center z-[70] backdrop-blur-sm p-4 animate-in fade-in duration-200">
-                    <div className="bg-white p-8 border border-black w-full max-w-sm shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] text-center">
+                    <div className="bg-white p-8 border border-black w-full max-w-sm shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] text-center rounded-2xl">
                         <AlertTriangle className="w-12 h-12 text-black mx-auto mb-4" />
                         <h2 className="text-xl font-bold text-black mb-2 tracking-tight">{title}</h2>
                         <p className="text-sm text-gray-500 mb-6">{message}</p>
                         <div className="flex gap-4">
-                            <button onClick={onCancel} className="flex-1 px-4 py-2 border border-black font-semibold hover:bg-gray-50 text-sm">Cancel</button>
-                            <button onClick={onConfirm} className="flex-1 px-4 py-2 bg-black text-white font-semibold hover:bg-gray-800 text-sm">Replace</button>
+                            <button onClick={onCancel} className="flex-1 px-4 py-2 border border-black font-semibold hover:bg-gray-50 text-sm rounded-xl transition-colors">Cancel</button>
+                            <button onClick={onConfirm} className="flex-1 px-4 py-2 bg-black text-white font-semibold hover:bg-gray-800 text-sm rounded-xl transition-colors">Replace</button>
                         </div>
                     </div>
                 </div>
@@ -145,7 +154,7 @@
             if (!isOpen) return null;
             return (
                 <div className="fixed inset-0 bg-white/80 flex items-center justify-center z-[60] backdrop-blur-sm p-4 animate-in fade-in duration-200">
-                    <div className="bg-white p-8 border border-black w-full max-w-md shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                    <div className="bg-white p-8 border border-black w-full max-w-md shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] rounded-2xl">
                         <div className="flex justify-between items-center mb-6">
                             <h2 className="text-xl font-bold text-black flex items-center gap-2"><Settings className="w-5 h-5" /> Settings</h2>
                             <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-full"><X className="w-5 h-5" /></button>
@@ -153,9 +162,9 @@
                         <label className="block text-xs font-bold text-black uppercase mb-1.5 tracking-wider">Gemini API key</label>
                         <div className="relative mb-8">
                             <KeyRound className="absolute left-3 top-3.5 w-4 h-4 text-gray-400" />
-                            <input type="password" className="w-full pl-10 pr-4 py-3 border border-gray-300 focus:border-black focus:ring-0 outline-none transition-all text-sm font-mono" value={keyInput} onChange={e => setKeyInput(e.target.value)} placeholder="AIzaSy..." />
+                            <input type="password" className="w-full pl-10 pr-4 py-3 border border-gray-300 focus:border-black focus:ring-0 outline-none transition-all text-sm font-mono rounded-xl" value={keyInput} onChange={e => setKeyInput(e.target.value)} placeholder="AIzaSy..." />
                         </div>
-                        <div className="flex justify-end"><button onClick={handleSave} disabled={isSaving} className="bg-black text-white px-6 py-2.5 font-bold hover:bg-gray-800 text-sm flex items-center gap-2"> {isSaving && <Spinner />} Save settings</button></div>
+                        <div className="flex justify-end"><button onClick={handleSave} disabled={isSaving} className="bg-black text-white px-6 py-2.5 font-bold hover:bg-gray-800 text-sm flex items-center gap-2 rounded-xl transition-colors"> {isSaving && <Spinner />} Save settings</button></div>
                     </div>
                 </div>
             );
@@ -170,14 +179,14 @@
             const handleSubmit = async (e) => { e.preventDefault(); setLoading(true); await onLogin(email, password, mode); setLoading(false); };
             return (
                 <div className="fixed inset-0 bg-white/80 flex items-center justify-center z-50 backdrop-blur-sm p-4 animate-in fade-in">
-                    <div className="bg-white p-8 border border-black w-full max-w-sm shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-                        <div className="text-center mb-8"><div className="bg-black w-16 h-16 flex items-center justify-center mx-auto mb-4"><User className="w-8 h-8 text-white" /></div><h2 className="text-2xl font-bold text-black tracking-tight">{mode === 'signin' ? 'Welcome back' : 'Create account'}</h2></div>
+                    <div className="bg-white p-8 border border-black w-full max-w-sm shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] rounded-3xl">
+                        <div className="text-center mb-8"><div className="bg-black w-16 h-16 flex items-center justify-center mx-auto mb-4 rounded-2xl"><User className="w-8 h-8 text-white" /></div><h2 className="text-2xl font-bold text-black tracking-tight">{mode === 'signin' ? 'Welcome back' : 'Create account'}</h2></div>
                         <form onSubmit={handleSubmit} className="space-y-5">
-                            <input type="email" required className="w-full px-4 py-3 border border-gray-300 focus:border-black outline-none text-sm" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" />
-                            <input type="password" required className="w-full px-4 py-3 border border-gray-300 focus:border-black outline-none text-sm" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" />
-                            <button type="submit" disabled={loading} className="w-full bg-black text-white py-3.5 font-bold hover:bg-gray-800 flex justify-center disabled:opacity-70">{loading ? <Spinner /> : (mode === 'signin' ? "Sign in" : "Create account")}</button>
+                            <input type="email" required className="w-full px-4 py-3 border border-gray-300 focus:border-black outline-none text-sm rounded-xl" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" />
+                            <input type="password" required className="w-full px-4 py-3 border border-gray-300 focus:border-black outline-none text-sm rounded-xl" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" />
+                            <button type="submit" disabled={loading} className="w-full bg-black text-white py-3.5 font-bold hover:bg-gray-800 flex justify-center disabled:opacity-70 rounded-xl transition-colors">{loading ? <Spinner /> : (mode === 'signin' ? "Sign in" : "Create account")}</button>
                         </form>
-                        <div className="mt-6 text-center border-t pt-4"><button onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')} className="text-sm text-black hover:underline">{mode === 'signin' ? "New here? Create account" : "Sign in instead"}</button></div>
+                        <div className="mt-6 text-center border-t pt-4 font-medium"><button onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')} className="text-sm text-black hover:underline">{mode === 'signin' ? "New here? Create account" : "Sign in instead"}</button></div>
                         <button onClick={onClose} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-black"><X className="w-5 h-5" /></button>
                     </div>
                 </div>
@@ -196,7 +205,7 @@
                         </div>
                         <div className="flex gap-4">
                             <button onClick={onLoginClick} className="px-5 py-2 text-sm font-medium text-gray-600 hover:text-black transition-colors">Sign in</button>
-                            <button onClick={onGuestClick} className="px-5 py-2 text-sm font-bold text-white bg-black hover:bg-gray-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)] border border-black">Try demo</button>
+                            <button onClick={onGuestClick} className="px-5 py-2 text-sm font-bold text-white bg-black hover:bg-gray-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)] border border-black rounded-full transition-all">Try demo</button>
                         </div>
                     </nav>
 
@@ -215,31 +224,31 @@
                             </p>
                             
                             <div className="flex flex-col sm:flex-row gap-6 justify-center items-center">
-                                <button onClick={onLoginClick} className="w-full sm:w-auto px-10 py-5 bg-black text-white font-bold text-lg hover:bg-gray-900 shadow-[8px_8px_0px_0px_rgba(209,213,219,1)] flex items-center justify-center gap-3 border border-black rounded-xl">
+                                <button onClick={onLoginClick} className="w-full sm:w-auto px-10 py-5 bg-black text-white font-bold text-lg hover:bg-gray-900 shadow-[8px_8px_0px_0px_rgba(209,213,219,1)] flex items-center justify-center gap-3 border border-black rounded-2xl transition-all">
                                     Get started <ArrowRight className="w-6 h-6" />
                                 </button>
-                                <button onClick={onGuestClick} className="w-full sm:w-auto px-10 py-5 bg-white text-black border border-gray-200 font-bold text-lg hover:bg-gray-50 rounded-xl">
+                                <button onClick={onGuestClick} className="w-full sm:w-auto px-10 py-5 bg-white text-black border border-gray-200 font-bold text-lg hover:bg-gray-50 rounded-2xl transition-all">
                                     Try guest
                                 </button>
                             </div>
 
                             <div className="grid md:grid-cols-3 gap-8 mt-24 text-left">
-                                <div className="p-8 bg-white border border-gray-200 hover:border-black transition-colors group rounded-2xl">
-                                    <div className="w-12 h-12 bg-gray-100 flex items-center justify-center mb-6 text-black group-hover:bg-black group-hover:text-white transition-colors rounded-xl">
+                                <div className="p-8 bg-white border border-gray-200 hover:border-black transition-colors group rounded-3xl">
+                                    <div className="w-12 h-12 bg-gray-100 flex items-center justify-center mb-6 text-black group-hover:bg-black group-hover:text-white transition-colors rounded-2xl">
                                         <Music className="w-6 h-6" />
                                     </div>
                                     <h3 className="font-bold text-black text-base mb-2">Real file analysis</h3>
                                     <p className="text-sm text-gray-500 leading-relaxed">Actual listening and transcription by Gemini 2.0.</p>
                                 </div>
-                                <div className="p-8 bg-white border border-gray-200 hover:border-black transition-colors group rounded-2xl">
-                                    <div className="w-12 h-12 bg-gray-100 flex items-center justify-center mb-6 text-black group-hover:bg-black group-hover:text-white transition-colors rounded-xl">
+                                <div className="p-8 bg-white border border-gray-200 hover:border-black transition-colors group rounded-3xl">
+                                    <div className="w-12 h-12 bg-gray-100 flex items-center justify-center mb-6 text-black group-hover:bg-black group-hover:text-white transition-colors rounded-2xl">
                                         <Repeat className="w-6 h-6" />
                                     </div>
                                     <h3 className="font-bold text-black text-base mb-2">Shadowing loops</h3>
                                     <p className="text-sm text-gray-500 leading-relaxed">Select segments to loop perfectly for shadowing.</p>
                                 </div>
-                                <div className="p-8 bg-white border border-gray-200 hover:border-black transition-colors group rounded-2xl">
-                                    <div className="w-12 h-12 bg-gray-100 flex items-center justify-center mb-6 text-black group-hover:bg-black group-hover:text-white transition-colors rounded-xl">
+                                <div className="p-8 bg-white border border-gray-200 hover:border-black transition-colors group rounded-3xl">
+                                    <div className="w-12 h-12 bg-gray-100 flex items-center justify-center mb-6 text-black group-hover:bg-black group-hover:text-white transition-colors rounded-2xl">
                                         <Database className="w-6 h-6" />
                                     </div>
                                     <h3 className="font-bold text-black text-base mb-2">Cloud storage</h3>
@@ -271,11 +280,11 @@
                 return () => clearInterval(interval);
             }, [isPlaying]);
 
-            if (!source) return <div className="w-full aspect-video bg-gray-50 flex items-center justify-center text-gray-400 font-medium text-sm tracking-normal">Media player ready</div>;
+            if (!source) return <div className="w-full aspect-video bg-gray-50 flex items-center justify-center text-gray-400 font-medium text-sm tracking-normal rounded-2xl">Media player ready</div>;
 
             const isAudio = source.mediaType === 'audio';
             return (
-                <div className={`relative ${isAudio ? 'h-0 overflow-hidden' : 'aspect-video bg-black rounded-2xl overflow-hidden shadow-lg'}`}>
+                <div className={`relative ${isAudio ? 'h-0 overflow-hidden' : 'aspect-video bg-black rounded-3xl overflow-hidden shadow-lg'}`}>
                     {isAudio ? (
                         <audio ref={mediaRef} src={source.url} onEnded={() => setIsPlaying(false)} />
                     ) : (
@@ -371,9 +380,13 @@
                     
                     if (user?.id !== 'demo-user') {
                         // 2. Upload to Supabase Storage
-                        // Using user_id folder for security
-                        const filePath = `${user.id}/${Date.now()}_${source.title}`;
+                        // Re-sanitizing path aggressively to prevent "Invalid Key" errors
+                        const sanitizedTitle = sanitizeFilename(source.title);
+                        const timestamp = Date.now();
+                        const filePath = `${user.id}/${timestamp}_${sanitizedTitle}`;
                         
+                        console.log(`Attempting upload to path: ${filePath}`);
+
                         const { data: uploadData, error: uploadError } = await supabase.storage
                             .from('media')
                             .upload(filePath, source.fileData, {
@@ -382,14 +395,18 @@
                             });
                         
                         if (uploadError) {
-                            console.error("Storage upload error:", uploadError);
-                            throw new Error(`Storage error: ${uploadError.message}`);
+                            console.error("Supabase Storage Error:", uploadError);
+                            // More descriptive alert for common storage issues
+                            if (uploadError.message.includes('Bucket not found')) {
+                                throw new Error("Bucket 'media' not found. Please ensure the bucket exists and RLS policies are configured in your Supabase dashboard.");
+                            }
+                            throw new Error(`Storage upload failed: ${uploadError.message}`);
                         }
 
                         // 3. Get Public URL
                         const { data: urlData } = supabase.storage.from('media').getPublicUrl(filePath);
                         
-                        // 4. Save Record to Database
+                        // 4. Save Record to Database (using ORIGINAL title for library display)
                         await supabase.from('transcripts').upsert({
                             user_id: user.id,
                             title: source.title,
@@ -446,7 +463,7 @@
                         <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView('landing')}><div className="bg-black p-2 rounded-lg"><Volume2 className="text-white w-5 h-5" /></div><h1 className="text-xl font-bold text-black tracking-tight">LingoMate <span className="text-xs text-white bg-black px-1.5 ml-1 rounded-md">ai</span></h1></div>
                         <div className="flex items-center gap-4">
                             <button onClick={() => setIsSettingsOpen(true)} className={`p-2 transition-all ${!geminiKey && !DEFAULT_API_KEY ? 'text-red-500 animate-pulse' : 'text-gray-400 hover:text-black'}`}><Settings className="w-5 h-5" /></button>
-                            {user ? <div className="flex items-center gap-3 border border-gray-200 pl-3 pr-2 py-1.5 rounded-full font-medium text-sm text-gray-600"><span>{user.email?.split('@')[0]}</span><button onClick={() => { supabase.auth.signOut(); setUser(null); setView('landing'); }} className="p-1 bg-gray-100 rounded-full hover:bg-black hover:text-white transition-colors"><LogOut className="w-4 h-4" /></button></div> : <button onClick={() => setIsLoginOpen(true)} className="px-5 py-2 bg-black text-white font-bold text-sm rounded-full">Sign in</button>}
+                            {user ? <div className="flex items-center gap-3 border border-gray-200 pl-3 pr-2 py-1.5 rounded-full font-medium text-sm text-gray-600"><span>{user.email?.split('@')[0]}</span><button onClick={() => { supabase.auth.signOut(); setUser(null); setView('landing'); }} className="p-1 bg-gray-100 rounded-full hover:bg-black hover:text-white transition-colors"><LogOut className="w-4 h-4" /></button></div> : <button onClick={() => setIsLoginOpen(true)} className="px-5 py-2 bg-black text-white font-bold text-sm rounded-full transition-colors">Sign in</button>}
                         </div>
                     </header>
 
@@ -456,7 +473,7 @@
                             <div className="flex-1 overflow-y-auto p-3 space-y-2">
                                 {history.length === 0 && <div className="text-center p-8 opacity-20"><Database className="w-8 h-8 mx-auto mb-2" /><p className="text-xs font-semibold tracking-normal">No files saved</p></div>}
                                 {history.map(item => (
-                                    <div key={item.id} onClick={() => loadSession(item)} className="p-3 border border-gray-100 hover:border-black rounded-xl cursor-pointer group relative transition-all bg-white">
+                                    <div key={item.id} onClick={() => loadSession(item)} className="p-3 border border-gray-100 hover:border-black rounded-2xl cursor-pointer group relative transition-all bg-white shadow-sm hover:shadow-md">
                                         <h3 className="font-bold text-xs truncate text-gray-800 pr-6">{item.title}</h3>
                                         <div className="flex justify-between items-center mt-2 opacity-50 text-[10px] font-medium"><span>{item.source_type}</span><span>{new Date(item.created_at).toLocaleDateString()}</span></div>
                                         <button onClick={(e) => deleteSession(e, item.id)} className="absolute top-2.5 right-2 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-black transition-opacity"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -473,21 +490,21 @@
                                         <div className="mt-16 bg-white p-12 border border-gray-100 shadow-sm rounded-3xl text-center group">
                                             <div className="w-16 h-16 bg-gray-50 mx-auto mb-6 flex items-center justify-center group-hover:bg-black group-hover:text-white transition-colors rounded-2xl"><Upload className="w-8 h-8" /></div>
                                             <h3 className="font-bold text-2xl mb-2 text-gray-900">Analyze media</h3>
-                                            <p className="text-gray-500 text-sm mb-8">Upload an audio or video file to start shadowing practice.</p>
-                                            <label className="block w-full bg-black text-white py-4 font-bold rounded-2xl cursor-pointer hover:bg-gray-800 transition-colors">Select file<input type="file" className="hidden" accept="video/*,audio/*" onChange={handleFileUpload} /></label>
+                                            <p className="text-gray-500 text-sm mb-8 font-normal">Upload an audio or video file to start shadowing practice.</p>
+                                            <label className="block w-full bg-black text-white py-4 font-bold rounded-2xl cursor-pointer hover:bg-gray-800 transition-colors shadow-lg">Select file<input type="file" className="hidden" accept="video/*,audio/*" onChange={handleFileUpload} /></label>
                                         </div>
                                     ) : (
                                         <div className="space-y-6 fade-in pt-4">
                                             <div className="flex justify-between items-center border-b border-gray-200 pb-2">
                                                 <h2 className="font-bold text-lg text-gray-900 truncate">{source.title}</h2>
-                                                <button onClick={() => setSource(null)} className="text-xs font-bold text-red-600 hover:bg-red-50 px-3 py-1 rounded-lg">Close</button>
+                                                <button onClick={() => setSource(null)} className="text-xs font-bold text-red-600 hover:bg-red-50 px-3 py-1 rounded-lg transition-colors">Close</button>
                                             </div>
                                             <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={seekTrigger} onTimeUpdate={handleTimeUpdate} loopRange={loopRange} />
-                                            <div className="bg-white border border-gray-100 p-5 flex items-center justify-between rounded-2xl shadow-sm">
+                                            <div className="bg-white border border-gray-100 p-5 flex items-center justify-between rounded-3xl shadow-sm">
                                                 <div className="flex items-center gap-4">
-                                                    <button onClick={() => setSeekTrigger(c => Math.max(0, currentTime - 5))} className="p-2.5 text-gray-500 hover:bg-gray-50 rounded-full"><RotateCcw className="w-5 h-5" /></button>
+                                                    <button onClick={() => setSeekTrigger(c => Math.max(0, currentTime - 5))} className="p-2.5 text-gray-500 hover:bg-gray-50 rounded-full transition-colors"><RotateCcw className="w-5 h-5" /></button>
                                                     <button onClick={() => setIsPlaying(!isPlaying)} className="w-14 h-14 bg-black text-white flex items-center justify-center rounded-full hover:scale-105 active:scale-95 transition-all shadow-lg">{isPlaying ? <Pause className="w-7 h-7" /> : <Play className="w-7 h-7 ml-1" />}</button>
-                                                    <button onClick={() => setSeekTrigger(c => currentTime + 5)} className="p-2.5 text-gray-500 hover:bg-gray-50 rounded-full"><RotateCcw className="w-5 h-5 scale-x-[-1]" /></button>
+                                                    <button onClick={() => setSeekTrigger(c => currentTime + 5)} className="p-2.5 text-gray-500 hover:bg-gray-50 rounded-full transition-colors"><RotateCcw className="w-5 h-5 scale-x-[-1]" /></button>
                                                 </div>
                                                 <div className="font-mono text-sm font-semibold text-gray-700 bg-gray-50 px-4 py-1.5 rounded-lg tabular-nums">{formatTime(currentTime)}</div>
                                                 <div className="w-24 flex justify-end">
@@ -498,10 +515,10 @@
                                                 <div className="bg-white border border-gray-100 p-10 flex flex-col items-center text-center rounded-3xl shadow-sm">
                                                     <div className="w-12 h-12 bg-gray-50 flex items-center justify-center rounded-xl mb-4 text-gray-400"><Sparkles className="w-6 h-6" /></div>
                                                     <h3 className="font-bold text-lg text-gray-900 mb-2">Analyze with ai</h3>
-                                                    <p className="text-sm text-gray-500 mb-8 max-w-xs leading-relaxed">Analysis creates an interactive script stored in your cloud library for replay.</p>
+                                                    <p className="text-sm text-gray-500 mb-8 max-w-xs leading-relaxed font-normal">Analysis creates an interactive script stored in your cloud library for replay.</p>
                                                     <div className="w-full space-y-4">
                                                         <input placeholder="Context (e.g. French lesson)" className="w-full px-5 py-3.5 bg-gray-50 border-none rounded-2xl text-sm outline-none placeholder:text-gray-300 focus:ring-2 focus:ring-black transition-all" value={contextPrompt} onChange={e => setContextPrompt(e.target.value)} />
-                                                        <button onClick={handleGenerate} disabled={isProcessing} className="w-full bg-black text-white py-4 font-bold rounded-2xl flex items-center justify-center gap-3 hover:bg-gray-800 disabled:opacity-50 transition-all">{isProcessing ? <Spinner /> : "Generate transcript"}</button>
+                                                        <button onClick={handleGenerate} disabled={isProcessing} className="w-full bg-black text-white py-4 font-bold rounded-2xl flex items-center justify-center gap-3 hover:bg-gray-800 disabled:opacity-50 transition-all shadow-md">{isProcessing ? <Spinner /> : "Generate transcript"}</button>
                                                     </div>
                                                 </div>
                                             )}
