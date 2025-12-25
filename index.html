@@ -48,6 +48,19 @@
                 .replace(/_+/g, '_');
         };
 
+        const getMediaDuration = (file) => {
+            return new Promise((resolve) => {
+                const url = URL.createObjectURL(file);
+                const media = file.type.startsWith('video/') ? document.createElement('video') : document.createElement('audio');
+                media.src = url;
+                media.onloadedmetadata = () => {
+                    URL.revokeObjectURL(url);
+                    resolve(media.duration);
+                };
+                media.onerror = () => resolve(0);
+            });
+        };
+
         // --- GEMINI HELPER ---
         const fileToGenerativePart = async (file) => {
             const base64EncodedDataPromise = new Promise((resolve) => {
@@ -60,7 +73,7 @@
             };
         };
 
-        const generateTranscript = async (apiKey, sourceType, sourceUrl, contextText, fileObject = null) => {
+        const generateTranscript = async (apiKey, sourceType, sourceUrl, contextText, fileObject = null, totalDuration = 0) => {
             const effectiveKey = apiKey || DEFAULT_API_KEY;
             if (!effectiveKey) throw new Error("Gemini API key is missing.");
 
@@ -69,12 +82,14 @@
                 const filePart = await fileToGenerativePart(fileObject);
                 parts = [
                     filePart,
-                    { text: `Transcribe this audio/video faithfully and completely. 
+                    { text: `Transcribe this audio/video faithfully and word-for-word. 
+                             The total length of this media is exactly ${totalDuration.toFixed(2)} seconds.
                              Context: "${contextText || 'No specific context'}". 
                              Output strictly in JSON format. 
                              Schema: Array of objects with text, start, end, speaker. 
-                             IMPORTANT: Ensure timestamps are extremely accurate, expressed in seconds (floats), and cover the ENTIRE duration from 0.0 to the very end of the file. 
-                             Do not truncate or summarize the end.` }
+                             IMPORTANT: Timestamps must be extremely accurate. 
+                             NO TIMESTAMP SHOULD EXCEED ${totalDuration.toFixed(2)} SECONDS. 
+                             Ensure segments are chronological and cover the entire file from 0.0 to the end.` }
                 ];
             } else {
                 throw new Error("No media file provided for analysis.");
@@ -89,7 +104,7 @@
                         body: JSON.stringify({
                             contents: [{ parts: parts }],
                             generationConfig: {
-                                temperature: 0, // Ensure precise, non-creative timing
+                                temperature: 0, 
                                 responseMimeType: "application/json",
                                 responseSchema: {
                                     type: "ARRAY",
@@ -168,7 +183,7 @@
                             <KeyRound className="absolute left-3 top-3.5 w-4 h-4 text-gray-400" />
                             <input type="password" className="w-full pl-10 pr-4 py-3 border border-gray-300 focus:border-black focus:ring-0 outline-none transition-all text-sm font-mono rounded-xl" value={keyInput} onChange={e => setKeyInput(e.target.value)} placeholder="AIzaSy..." />
                         </div>
-                        <div className="flex justify-end"><button onClick={handleSave} disabled={isSaving} className="bg-black text-white px-6 py-2.5 font-bold hover:bg-gray-800 text-sm flex items-center gap-2 rounded-xl"> {isSaving && <Spinner />} Save settings</button></div>
+                        <div className="flex justify-end"><button onClick={handleSave} disabled={isSaving} className="bg-black text-white px-6 py-2.5 font-bold hover:bg-gray-800 text-sm flex items-center gap-2 rounded-xl transition-colors"> {isSaving && <Spinner />} Save settings</button></div>
                     </div>
                 </div>
             );
@@ -188,7 +203,7 @@
                         <form onSubmit={handleSubmit} className="space-y-5">
                             <input type="email" required className="w-full px-4 py-3 border border-gray-300 focus:border-black outline-none text-sm rounded-xl" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" />
                             <input type="password" required className="w-full px-4 py-3 border border-gray-300 focus:border-black outline-none text-sm rounded-xl" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" />
-                            <button type="submit" disabled={loading} className="w-full bg-black text-white py-3.5 font-bold hover:bg-gray-800 flex justify-center disabled:opacity-70 rounded-xl">{loading ? <Spinner /> : (mode === 'signin' ? "Sign in" : "Create account")}</button>
+                            <button type="submit" disabled={loading} className="w-full bg-black text-white py-3.5 font-bold hover:bg-gray-800 flex justify-center disabled:opacity-70 rounded-xl transition-colors">{loading ? <Spinner /> : (mode === 'signin' ? "Sign in" : "Create account")}</button>
                         </form>
                         <div className="mt-6 text-center border-t pt-4 font-medium"><button onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')} className="text-sm text-black hover:underline">{mode === 'signin' ? "New here? Create account" : "Sign in instead"}</button></div>
                         <button onClick={onClose} className="absolute top-4 right-4 p-2 text-gray-400 hover:text-black"><X className="w-5 h-5" /></button>
@@ -209,7 +224,7 @@
                         </div>
                         <div className="flex gap-4">
                             <button onClick={onLoginClick} className="px-5 py-2 text-sm font-medium text-gray-600 hover:text-black transition-colors">Sign in</button>
-                            <button onClick={onGuestClick} className="px-5 py-2 text-sm font-bold text-white bg-black hover:bg-gray-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)] border border-black rounded-full">Try demo</button>
+                            <button onClick={onGuestClick} className="px-5 py-2 text-sm font-bold text-white bg-black hover:bg-gray-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)] border border-black rounded-full transition-all">Try demo</button>
                         </div>
                     </nav>
 
@@ -228,10 +243,10 @@
                             </p>
                             
                             <div className="flex flex-col sm:flex-row gap-6 justify-center items-center">
-                                <button onClick={onLoginClick} className="w-full sm:w-auto px-10 py-5 bg-black text-white font-bold text-lg hover:bg-gray-900 shadow-[8px_8px_0px_0px_rgba(209,213,219,1)] flex items-center justify-center gap-3 border border-black rounded-2xl">
+                                <button onClick={onLoginClick} className="w-full sm:w-auto px-10 py-5 bg-black text-white font-bold text-lg hover:bg-gray-900 shadow-[8px_8px_0px_0px_rgba(209,213,219,1)] flex items-center justify-center gap-3 border border-black rounded-2xl transition-all">
                                     Get started <ArrowRight className="w-6 h-6" />
                                 </button>
-                                <button onClick={onGuestClick} className="w-full sm:w-auto px-10 py-5 bg-white text-black border border-gray-200 font-bold text-lg hover:bg-gray-50 rounded-2xl">
+                                <button onClick={onGuestClick} className="w-full sm:w-auto px-10 py-5 bg-white text-black border border-gray-200 font-bold text-lg hover:bg-gray-50 rounded-2xl transition-all">
                                     Try guest
                                 </button>
                             </div>
@@ -354,7 +369,15 @@
             const processFileUpload = async (file) => {
                 const url = URL.createObjectURL(file);
                 const isAudio = file.type.startsWith('audio/');
-                setSource({ type: 'file', mediaType: isAudio ? 'audio' : 'video', url, title: file.name, fileData: file });
+                const duration = await getMediaDuration(file);
+                setSource({ 
+                    type: 'file', 
+                    mediaType: isAudio ? 'audio' : 'video', 
+                    url, 
+                    title: file.name, 
+                    fileData: file,
+                    duration: duration
+                });
                 setTranscript([]);
                 setIsPlaying(false);
             };
@@ -378,7 +401,8 @@
                 if (!ek) { setIsSettingsOpen(true); return; }
                 setIsProcessing(true);
                 try {
-                    const result = await generateTranscript(ek, source.type, null, contextPrompt || source.title, source.fileData);
+                    // Pass the actual duration to prevent timestamp hallucination
+                    const result = await generateTranscript(ek, source.type, null, contextPrompt || source.title, source.fileData, source.duration || 0);
                     setTranscript(result);
                     
                     if (user?.id !== 'demo-user') {
