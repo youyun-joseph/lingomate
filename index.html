@@ -19,6 +19,32 @@
         @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .panel-transition { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        
+        /* Dictation input styling */
+        .dictation-input {
+            width: 2rem;
+            height: 2.5rem;
+            text-align: center;
+            border-bottom: 2px solid #e5e7eb;
+            background: transparent;
+            font-size: 1.125rem;
+            font-weight: 600;
+            outline: none;
+            transition: all 0.2s;
+            text-transform: none;
+        }
+        .dictation-input:focus {
+            border-bottom-color: #000;
+            background: #f9fafb;
+        }
+        .dictation-input.correct {
+            color: #059669;
+            border-bottom-color: #059669;
+        }
+        .dictation-input.incorrect {
+            color: #dc2626;
+            border-bottom-color: #dc2626;
+        }
     </style>
 </head>
 <body class="bg-white text-gray-900 h-screen flex flex-col overflow-hidden selection:bg-gray-200 selection:text-black">
@@ -272,12 +298,23 @@
             const [chunkSize, setChunkSize] = useState('single'); 
             const activeSegmentRef = useRef(null);
 
+            // Recording States
             const [isRecording, setIsRecording] = useState(false);
             const [recorder, setRecorder] = useState(null);
             const [recordedBlob, setRecordedBlob] = useState(null);
             const [recordingsList, setRecordingsList] = useState([]);
             const [isSavingRecord, setIsSavingRecord] = useState(false);
 
+            // Dictation User Input State
+            const [dictationValues, setDictationValues] = useState({});
+            const [dictationChecked, setDictationChecked] = useState(false);
+
+            // Toggle logic for transcript panel collapse
+            const autoCollapseTranscript = () => {
+                if (transcriptOpen) setTranscriptOpen(false);
+            };
+
+            // Sidebar and transcript initial auto-toggle based on active media
             useEffect(() => {
                 if (!source) {
                     setSidebarOpen(true);
@@ -287,6 +324,12 @@
                     setTranscriptOpen(true);
                 }
             }, [source]);
+
+            // Clear dictation on sentence change
+            useEffect(() => {
+                setDictationValues({});
+                setDictationChecked(false);
+            }, [transcript, seekTrigger]);
 
             useEffect(() => {
                 const storedKey = localStorage.getItem('lingomate_gemini_key');
@@ -322,6 +365,7 @@
             };
 
             const startRecording = async () => {
+                autoCollapseTranscript();
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     const newRecorder = new MediaRecorder(stream);
@@ -338,6 +382,7 @@
             };
 
             const stopRecording = () => {
+                autoCollapseTranscript();
                 if (recorder) {
                     recorder.stop();
                     recorder.stream.getTracks().forEach(track => track.stop());
@@ -346,6 +391,7 @@
             };
 
             const saveRecording = async () => {
+                autoCollapseTranscript();
                 if (!recordedBlob || !user || user.id === 'demo-user') return;
                 setIsSavingRecord(true);
                 try {
@@ -366,6 +412,7 @@
             };
 
             const deleteRecording = async (id) => {
+                autoCollapseTranscript();
                 const { error } = await supabase.from('user_recordings').delete().eq('id', id);
                 if (!error) fetchRecordings(user.id);
             };
@@ -445,6 +492,7 @@
             });
 
             const seekWithStop = (index) => {
+                autoCollapseTranscript();
                 if (!transcript || transcript.length === 0) return;
                 const targetIdx = Math.max(0, Math.min(index, transcript.length - 1));
                 const startSegment = transcript[targetIdx];
@@ -478,24 +526,69 @@
                 }
             };
 
-            // Helper to render dictation word slots
+            // Enhanced Direct Input Dictation Logic
+            const handleDictationChange = (wordIdx, charIdx, val, nextInputId) => {
+                const key = `${wordIdx}_${charIdx}`;
+                const singleChar = val.slice(-1);
+                setDictationValues(prev => ({ ...prev, [key]: singleChar }));
+                if (singleChar && nextInputId) {
+                    const nextEl = document.getElementById(nextInputId);
+                    if (nextEl) nextEl.focus();
+                }
+            };
+
+            const handleDictationKeyDown = (wordIdx, charIdx, e, prevInputId, nextInputId) => {
+                const key = `${wordIdx}_${charIdx}`;
+                if (e.key === 'Backspace' && !dictationValues[key] && prevInputId) {
+                    const prevEl = document.getElementById(prevInputId);
+                    if (prevEl) prevEl.focus();
+                }
+                if (e.key === ' ') {
+                    e.preventDefault();
+                    if (nextInputId) {
+                        const [nextWordIdx] = nextInputId.split('-')[1].split('_');
+                        const firstCharOfNextWordId = `input-${nextWordIdx}_0`;
+                        const targetEl = document.getElementById(firstCharOfNextWordId) || document.getElementById(nextInputId);
+                        if (targetEl) targetEl.focus();
+                    }
+                }
+            };
+
             const renderDictationSlots = () => {
-                const text = transcript[activeIndex]?.text || "";
-                if (!text) return null;
-                const tokens = text.split(/\s+/).filter(t => t.length > 0);
+                const activeSentence = transcript[activeIndex]?.text || "";
+                if (!activeSentence) return <p className="text-gray-300 font-sans italic">Select a sentence to begin dictation</p>;
+
+                const tokens = activeSentence.split(/\s+/).filter(t => t.length > 0);
                 return (
-                    <div className="flex flex-wrap gap-x-4 gap-y-3 mb-6 font-sans">
-                        {tokens.map((token, i) => {
+                    <div className="flex flex-wrap gap-x-6 gap-y-8 justify-center font-sans">
+                        {tokens.map((token, wordIdx) => {
                             const cleanWord = token.replace(/[.,!?;:"]/g, '');
                             const punctuation = token.match(/[.,!?;:"]/g);
                             return (
-                                <div key={i} className="flex items-end gap-0.5">
-                                    <div className="flex gap-0.5">
-                                        {[...Array(cleanWord.length)].map((_, j) => (
-                                            <div key={j} className="w-3 h-0.5 bg-gray-300 rounded-full"></div>
-                                        ))}
+                                <div key={wordIdx} className="flex items-end gap-1">
+                                    <div className="flex gap-1">
+                                        {[...Array(cleanWord.length)].map((_, charIdx) => {
+                                            const currentKey = `${wordIdx}_${charIdx}`;
+                                            const inputId = `input-${currentKey}`;
+                                            const nextKey = (charIdx < cleanWord.length - 1) ? `${wordIdx}_${charIdx + 1}` : (wordIdx < tokens.length - 1) ? `${wordIdx + 1}_0` : null;
+                                            const prevKey = (charIdx > 0) ? `${wordIdx}_${charIdx - 1}` : (wordIdx > 0) ? `${wordIdx - 1}_${tokens[wordIdx-1].replace(/[.,!?;:"]/g, '').length - 1}` : null;
+                                            const isCorrect = dictationChecked && dictationValues[currentKey]?.toLowerCase() === cleanWord[charIdx].toLowerCase();
+                                            const isIncorrect = dictationChecked && dictationValues[currentKey] && dictationValues[currentKey]?.toLowerCase() !== cleanWord[charIdx].toLowerCase();
+                                            return (
+                                                <input
+                                                    key={charIdx}
+                                                    id={inputId}
+                                                    type="text"
+                                                    autoComplete="off"
+                                                    className={`dictation-input ${isCorrect ? 'correct' : ''} ${isIncorrect ? 'incorrect' : ''}`}
+                                                    value={dictationValues[currentKey] || ''}
+                                                    onChange={(e) => handleDictationChange(wordIdx, charIdx, e.target.value, nextKey ? `input-${nextKey}` : null)}
+                                                    onKeyDown={(e) => handleDictationKeyDown(wordIdx, charIdx, e, prevKey ? `input-${prevKey}` : null, nextKey ? `input-${nextKey}` : null)}
+                                                />
+                                            );
+                                        })}
                                     </div>
-                                    {punctuation && <span className="text-gray-400 text-sm font-bold leading-none">{punctuation}</span>}
+                                    {punctuation && <span className="text-gray-400 text-xl font-bold pb-1">{punctuation}</span>}
                                 </div>
                             );
                         })}
@@ -503,13 +596,11 @@
                 );
             };
 
-            useEffect(() => { if (activeSegmentRef.current && isPlaying) activeSegmentRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, [activeIndex, isPlaying]);
-
             return (
                 <div className="h-full flex flex-col font-sans text-gray-900 bg-white fade-in overflow-hidden">
                     <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} onLogin={null} />
                     <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} apiKey={geminiKey} onSave={saveSettings} />
-                    <ConfirmModal isOpen={isReplaceConfirmOpen} title="Replace existing file?" message={`A file named "${pendingFile?.name}" already exists. Replacing it will regenerate the transcript.`} onConfirm={onConfirmReplace} onCancel={() => { setIsReplaceConfirmOpen(false); setPendingFile(null); }} />
+                    <ConfirmModal isOpen={isReplaceConfirmOpen} title="Replace existing file?" message={`A file named "${pendingFile?.name}" already exists in your library. Replacing it will regenerate the transcript.`} onConfirm={onConfirmReplace} onCancel={() => { setIsReplaceConfirmOpen(false); setPendingFile(null); }} />
 
                     <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center z-20 shadow-none font-sans">
                         <div className="flex items-center gap-3 cursor-pointer font-sans"><div className="bg-black p-2 rounded-lg"><Volume2 className="text-white w-5 h-5" /></div><h1 className="text-xl font-bold text-black tracking-tight">LingoMate <span className="text-xs text-white bg-black px-1.5 ml-1 rounded-md">Listening Practice</span></h1></div>
@@ -603,14 +694,14 @@
                                                 <div className="bg-white border border-gray-100 rounded-3xl overflow-hidden shadow-sm flex flex-col font-sans font-medium">
                                                     <div className="flex border-b bg-gray-50/50 font-sans">
                                                         {['Shadowing', 'Dictation', 'Vocabulary'].map(tab => (
-                                                            <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 py-4 text-sm font-bold border-b-2 transition-all font-sans ${activeTab === tab ? 'border-black text-black bg-white' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
+                                                            <button key={tab} onClick={() => { setActiveTab(tab); autoCollapseTranscript(); }} className={`flex-1 py-4 text-sm font-bold border-b-2 transition-all ${activeTab === tab ? 'border-black text-black bg-white' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                                                                 {tab}
                                                             </button>
                                                         ))}
                                                     </div>
                                                     <div className="p-6 font-sans">
                                                         {activeTab === 'Shadowing' && (
-                                                            <div className="space-y-8 fade-in font-sans">
+                                                            <div className="space-y-8 fade-in">
                                                                 <div className="flex flex-col space-y-4">
                                                                     <div className="flex items-center justify-between px-1 font-sans">
                                                                         <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2"><Layers className="w-3 h-3" /> Practice chunk size</label>
@@ -638,16 +729,16 @@
                                                                         )}
                                                                         {recordedBlob && !isRecording && (
                                                                             <>
-                                                                                <button onClick={() => { const url = URL.createObjectURL(recordedBlob); new Audio(url).play(); }} className="p-3 bg-white border border-gray-200 rounded-xl hover:bg-gray-100 font-sans"><Play className="w-4 h-4 text-black font-sans" /></button>
+                                                                                <button onClick={() => { autoCollapseTranscript(); const url = URL.createObjectURL(recordedBlob); new Audio(url).play(); }} className="p-3 bg-white border border-gray-200 rounded-xl hover:bg-gray-100 font-sans"><Play className="w-4 h-4 text-black font-sans" /></button>
                                                                                 <button onClick={saveRecording} disabled={isSavingRecord} className="px-5 py-3 bg-black text-white font-bold text-xs uppercase rounded-xl flex items-center gap-2 font-sans">{isSavingRecord ? <Spinner /> : <Save className="w-4 h-4 font-sans" />} Save</button>
                                                                             </>
                                                                         )}
                                                                     </div>
-                                                                    <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar pt-2 font-sans font-medium">
+                                                                    <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar pt-2 font-sans">
                                                                         {recordingsList.map(rec => (
-                                                                            <div key={rec.id} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl font-sans">
-                                                                                <div className="flex items-center gap-3 font-sans font-medium">
-                                                                                    <button onClick={() => new Audio(rec.file_url).play()} className="p-2 bg-gray-50 rounded-lg hover:bg-gray-100 font-sans"><Play className="w-3 h-3 text-black font-sans" /></button>
+                                                                            <div key={rec.id} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl font-sans font-medium">
+                                                                                <div className="flex items-center gap-3 font-sans">
+                                                                                    <button onClick={() => { autoCollapseTranscript(); new Audio(rec.file_url).play(); }} className="p-2 bg-gray-50 rounded-lg hover:bg-gray-100 font-sans"><Play className="w-3 h-3 text-black font-sans" /></button>
                                                                                     <div className="flex flex-col font-sans"><span className="text-[10px] font-bold text-gray-800 truncate max-w-[150px] font-sans">{rec.title}</span><span className="text-[9px] text-gray-400 font-sans">{new Date(rec.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span></div>
                                                                                 </div>
                                                                                 <button onClick={() => deleteRecording(rec.id)} className="p-2 text-gray-300 hover:text-red-500 transition-colors font-sans"><Trash2 className="w-3.5 h-3.5 font-sans" /></button>
@@ -658,17 +749,23 @@
                                                             </div>
                                                         )}
                                                         {activeTab === 'Dictation' && (
-                                                            <div className="h-full flex flex-col space-y-4 fade-in font-sans">
-                                                                {/* Word Count and Length Indicators */}
-                                                                <div className="p-6 bg-gray-50 rounded-3xl border border-gray-100 min-h-[120px] flex items-center justify-center">
+                                                            <div className="h-full flex flex-col space-y-6 fade-in font-sans">
+                                                                <div className="p-10 bg-gray-50 rounded-[2.5rem] border border-gray-100 min-h-[300px] flex items-center justify-center overflow-y-auto custom-scrollbar">
                                                                     {renderDictationSlots()}
                                                                 </div>
-                                                                <textarea className="w-full p-6 bg-white border border-gray-100 rounded-2xl focus:ring-2 focus:ring-black outline-none text-sm min-h-[150px] font-sans font-medium" placeholder="Type what you hear..."></textarea>
-                                                                <div className="flex justify-end font-sans"><button className="px-6 py-2.5 bg-black text-white text-xs font-bold rounded-xl shadow-sm font-sans font-medium">Check my spelling</button></div>
+                                                                <div className="flex justify-between items-center px-2">
+                                                                    <p className="text-xs text-gray-400 font-medium italic">Tip: Use [Space] to skip to the next word</p>
+                                                                    <button 
+                                                                        onClick={() => { setDictationChecked(true); autoCollapseTranscript(); }}
+                                                                        className="px-8 py-3 bg-black text-white text-sm font-bold rounded-2xl shadow-lg hover:scale-105 active:scale-95 transition-all"
+                                                                    >
+                                                                        Check spelling
+                                                                    </button>
+                                                                </div>
                                                             </div>
                                                         )}
                                                         {activeTab === 'Vocabulary' && (
-                                                            <div className="p-8 flex flex-col items-center justify-center text-center space-y-4 fade-in font-sans font-medium"><BookOpen className="w-12 h-12 text-gray-200 font-sans" /><div className="space-y-1 font-sans"><h4 className="font-bold text-gray-900 font-sans">Personal dictionary</h4><p className="text-xs text-gray-400 font-sans">Add words from the transcript to your list.</p></div><button className="px-6 py-2.5 border border-gray-200 text-gray-600 text-xs font-bold rounded-xl hover:bg-gray-50 font-sans font-medium">+ Add new word</button></div>
+                                                            <div className="p-8 flex flex-col items-center justify-center text-center space-y-4 fade-in font-sans font-medium"><BookOpen className="w-12 h-12 text-gray-200 font-sans" /><div className="space-y-1 font-sans"><h4 className="font-bold text-gray-900 font-sans">Personal dictionary</h4><p className="text-xs text-gray-400 font-sans">Add words from the transcript to your list.</p></div><button onClick={autoCollapseTranscript} className="px-6 py-2.5 border border-gray-200 text-gray-600 text-xs font-bold rounded-xl hover:bg-gray-50 font-sans font-medium">+ Add new word</button></div>
                                                         )}
                                                     </div>
                                                 </div>
