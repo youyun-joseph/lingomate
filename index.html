@@ -273,7 +273,6 @@
                 );
             }
 
-            // Audio Mode: Render strictly the element for logic, remove redundant visual panel
             return (
                 <audio 
                     ref={mediaRef} 
@@ -292,6 +291,7 @@
             const [isVocabOpen, setIsVocabOpen] = useState(false);
             const [isReplaceConfirmOpen, setIsReplaceConfirmOpen] = useState(false);
             const [sidebarOpen, setSidebarOpen] = useState(true); 
+            const [transcriptOpen, setTranscriptOpen] = useState(true); // Restored
             const [source, setSource] = useState(null);
             const [transcript, setTranscript] = useState([]);
             const [isPlaying, setIsPlaying] = useState(false);
@@ -323,9 +323,17 @@
             // Selection state for floating menu
             const [selectionState, setSelectionState] = useState({ visible: false, x: 0, y: 0, text: '' });
 
+            // Auto collapse logic
+            const autoCollapseTranscript = () => { if (transcriptOpen) setTranscriptOpen(false); };
+
             useEffect(() => {
-                if (!source) { setSidebarOpen(true); } 
-                else { setSidebarOpen(false); }
+                if (!source) { 
+                    setSidebarOpen(true); 
+                    setTranscriptOpen(false); 
+                } else { 
+                    setSidebarOpen(false); 
+                    setTranscriptOpen(true); 
+                }
             }, [source]);
 
             useEffect(() => {
@@ -478,6 +486,7 @@
             });
 
             const seekWithStop = (index) => {
+                autoCollapseTranscript(); // Restored logic
                 if (!transcript || transcript.length === 0) return;
                 const targetIdx = Math.max(0, Math.min(index, transcript.length - 1));
                 const startSegment = transcript[targetIdx];
@@ -496,7 +505,14 @@
                 setSeekTrigger(startTime); setStopAtTime(stopTime); setIsPlaying(true);
             };
 
+            const handleTranscriptSeek = (index) => {
+                if (!transcript || transcript.length === 0) return;
+                const seg = transcript[index];
+                if (seg) { setSeekTrigger(seg.start); setStopAtTime(seg.end); setIsPlaying(true); }
+            };
+
             const triggerAnalysis = async () => {
+                autoCollapseTranscript(); // Restored logic
                 const sentence = transcript[activeIndex]?.text;
                 if (!sentence) return;
                 setIsAnalyzing(true);
@@ -645,6 +661,9 @@
 
                         <main className="flex-1 flex flex-col min-w-0 bg-gray-50 overflow-hidden relative">
                             {!sidebarOpen && <div className="absolute top-4 left-4 z-20"><button onClick={() => setSidebarOpen(true)} className="p-3 bg-white border border-gray-200 rounded-full text-gray-600 shadow-lg hover:bg-gray-50 transition-all flex items-center gap-2 px-5 font-bold text-xs uppercase tracking-widest"><History className="w-4 h-4" /> Library <ChevronRight className="w-4 h-4" /></button></div>}
+                            
+                            {/* Restored Toggle Button */}
+                            {!transcriptOpen && transcript.length > 0 && <div className="absolute top-4 right-4 z-20"><button onClick={() => setTranscriptOpen(true)} className="p-3 bg-white border border-gray-200 rounded-full text-gray-600 shadow-lg hover:bg-gray-50 transition-all flex items-center gap-2 px-5 font-bold text-xs uppercase tracking-widest"><ChevronLeft className="w-4 h-4" /> Transcript <FileText className="w-4 h-4" /></button></div>}
 
                             <div className="flex-1 flex flex-col overflow-y-auto relative custom-scrollbar">
                                 <div className="px-8 pb-12 pt-16 max-w-3xl mx-auto w-full">
@@ -677,7 +696,7 @@
                                                 <div className="bg-white border border-gray-100 rounded-3xl overflow-hidden shadow-sm flex flex-col mt-4">
                                                     <div className="flex border-b bg-gray-50/50">
                                                         {['Shadowing', 'Dictation', 'Grammar'].map(tab => (
-                                                            <button key={tab} onClick={() => { setActiveTab(tab === 'Dictation' ? 'Dictation' : tab === 'Grammar' ? 'Meaning and Grammar' : 'Shadowing'); }} className={`flex-1 py-4 text-sm font-bold border-b-2 transition-all ${((activeTab === 'Dictation' && tab === 'Dictation') || (activeTab === 'Meaning and Grammar' && tab === 'Grammar') || (activeTab === 'Shadowing' && tab === 'Shadowing')) ? 'border-black text-black bg-white' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>{tab}</button>
+                                                            <button key={tab} onClick={() => { setActiveTab(tab === 'Dictation' ? 'Dictation' : tab === 'Grammar' ? 'Meaning and Grammar' : 'Shadowing'); autoCollapseTranscript(); }} className={`flex-1 py-4 text-sm font-bold border-b-2 transition-all ${((activeTab === 'Dictation' && tab === 'Dictation') || (activeTab === 'Meaning and Grammar' && tab === 'Grammar') || (activeTab === 'Shadowing' && tab === 'Shadowing')) ? 'border-black text-black bg-white' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>{tab}</button>
                                                         ))}
                                                     </div>
                                                     <div className="p-6">
@@ -718,6 +737,19 @@
                                 </div>
                             </div>
                         </main>
+
+                        {/* Restored Transcript Sidebar */}
+                        <aside className={`${transcriptOpen && transcript.length > 0 ? 'w-[450px] border-l' : 'w-0'} bg-white transition-all duration-300 overflow-hidden flex flex-col z-10 relative`}>
+                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[450px]"><h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><FileText className="w-4 h-4" /> Full Transcript</h2><button onClick={() => setTranscriptOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronRight className="w-4 h-4" /></button></div>
+                            <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-[450px] custom-scrollbar pb-24">
+                                {transcript.map((s, idx) => (
+                                    <div key={idx} onClick={() => handleTranscriptSeek(idx)} className={`p-4 rounded-2xl cursor-pointer transition-all border-2 ${activeIndex === idx ? 'bg-black border-black text-white shadow-lg' : 'bg-white border-transparent hover:border-gray-100 text-gray-500'}`}>
+                                        <div className="flex justify-between items-center mb-1 text-[10px] font-bold uppercase tracking-wider opacity-60"><span>{s.speaker || 'Speaker'}</span><span>{formatTime(s.start)}</span></div>
+                                        <p className="text-sm font-medium leading-relaxed">{s.text}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </aside>
                     </div>
                 </div>
             );
