@@ -32,9 +32,21 @@
         .dictation-input:focus { border-bottom-color: #000; background: #f9fafb; }
         .dictation-input.correct { color: #059669; border-bottom-color: #059669; }
         .dictation-input.incorrect { color: #dc2626; border-bottom-color: #dc2626; }
+
+        .floating-add-btn {
+            position: fixed;
+            z-index: 1000;
+            transform: translate(-50%, -100%);
+            margin-top: -10px;
+            animation: popIn 0.2s ease-out;
+        }
+        @keyframes popIn {
+            from { opacity: 0; transform: translate(-50%, -100%) scale(0.9); }
+            to { opacity: 1; transform: translate(-50%, -100%) scale(1); }
+        }
     </style>
 </head>
-<body class="bg-white text-gray-900 h-screen flex flex-col overflow-hidden selection:bg-gray-200 selection:text-black">
+<body class="bg-white text-gray-900 h-screen flex flex-col overflow-hidden selection:bg-indigo-100 selection:text-indigo-900">
     <div id="root" class="h-full flex flex-col"></div>
 
     <script type="text/babel" data-type="module">
@@ -45,7 +57,7 @@
             Play, Pause, ChevronRight, ChevronLeft, 
             Upload, FileText, History, Settings, 
             Repeat, Mic, Volume2, User, LogOut, Loader2, X, Database, Save, AlertCircle, 
-            CheckCircle2, ArrowRight, Music, KeyRound, AlertTriangle, Trash2, SkipBack, SkipForward, RefreshCw, PenTool, BookOpen, Layers, Square, Circle, Eye, Book, Languages
+            CheckCircle2, ArrowRight, Music, KeyRound, AlertTriangle, Trash2, SkipBack, SkipForward, RefreshCw, PenTool, BookOpen, Layers, Square, Circle, Eye, Book, Languages, Plus
         } from 'https://esm.sh/lucide-react@0.344.0';
 
         // --- CONFIGURATION ---
@@ -249,26 +261,31 @@
                 }
             }, [seekTime]);
 
-            return (
-                <div className="w-full aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl relative border-4 border-white">
-                    {source.mediaType === 'video' ? (
+            if (source.mediaType === 'video') {
+                return (
+                    <div className="w-full aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl relative border-4 border-white">
                         <video 
                             ref={mediaRef} 
                             src={source.url} 
                             className="w-full h-full object-contain"
                             onTimeUpdate={(e) => onTimeUpdate(e.target.currentTime)}
                         />
-                    ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-gray-900 to-black p-8 text-center">
-                            <Music className="w-20 h-20 text-white/20 mb-4" />
-                            <audio 
-                                ref={mediaRef} 
-                                src={source.url} 
-                                onTimeUpdate={(e) => onTimeUpdate(e.target.currentTime)}
-                            />
-                            <div className="text-white/60 text-sm font-medium">{source.title}</div>
-                        </div>
-                    )}
+                    </div>
+                );
+            }
+
+            return (
+                <div className="w-full p-8 bg-gradient-to-br from-indigo-600 to-indigo-900 rounded-3xl shadow-xl border-4 border-white flex flex-col items-center justify-center">
+                    <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mb-4">
+                        <Music className="w-8 h-8 text-white" />
+                    </div>
+                    <audio 
+                        ref={mediaRef} 
+                        src={source.url} 
+                        onTimeUpdate={(e) => onTimeUpdate(e.target.currentTime)}
+                    />
+                    <div className="text-white text-lg font-bold truncate max-w-full text-center">{source.title}</div>
+                    <div className="text-indigo-200 text-xs mt-1 uppercase tracking-widest font-medium">Audio Mode</div>
                 </div>
             );
         };
@@ -311,6 +328,9 @@
             const [recordingsList, setRecordingsList] = useState([]);
             const [isSavingRecord, setIsSavingRecord] = useState(false);
 
+            // Floating menu for selection
+            const [selectionMenu, setSelectionMenu] = useState({ visible: false, x: 0, y: 0, text: '' });
+
             const autoCollapseTranscript = () => { if (transcriptOpen) setTranscriptOpen(false); };
 
             useEffect(() => {
@@ -323,7 +343,6 @@
             }, [transcript, seekTrigger]);
 
             useEffect(() => {
-                // Fetch user and settings safely
                 const init = async () => {
                     try {
                         const { data } = await supabase.auth.getUser();
@@ -350,7 +369,30 @@
                         fetchHistory();
                     }
                 });
-                return () => { if (subscription) subscription.unsubscribe(); };
+
+                // Listen for text selection
+                const handleSelection = () => {
+                    const selection = window.getSelection();
+                    const text = selection.toString().trim();
+                    if (text && text.length > 0 && text.length < 100) {
+                        const range = selection.getRangeAt(0);
+                        const rect = range.getBoundingClientRect();
+                        setSelectionMenu({
+                            visible: true,
+                            x: rect.left + rect.width / 2,
+                            y: rect.top,
+                            text: text
+                        });
+                    } else {
+                        setSelectionMenu(prev => ({ ...prev, visible: false }));
+                    }
+                };
+
+                document.addEventListener('mouseup', handleSelection);
+                return () => { 
+                    if (subscription) subscription.unsubscribe(); 
+                    document.removeEventListener('mouseup', handleSelection);
+                };
             }, []);
 
             const fetchSettings = async (uid) => {
@@ -378,10 +420,23 @@
                 if (data) setVocabulary(data);
             };
 
+            const addWordToVocab = async (word, definition = "") => {
+                if (!user) { setIsLoginOpen(true); return; }
+                const { error } = await supabase.from('user_vocabulary').insert([{ 
+                    user_id: user.id, 
+                    word: word, 
+                    definition: definition || "Manual entry", 
+                    example: "" 
+                }]);
+                if (!error) { 
+                    fetchVocabulary(user.id);
+                    setSelectionMenu(prev => ({ ...prev, visible: false }));
+                }
+            };
+
             const saveVocabWord = async () => {
                 if (!analysis || !user) return;
-                const { error } = await supabase.from('user_vocabulary').insert([{ user_id: user.id, word: analysis.content, definition: analysis.meaning, example: "" }]);
-                if (!error) { fetchVocabulary(user.id); }
+                addWordToVocab(analysis.content, analysis.meaning);
             };
 
             const deleteVocabWord = async (id) => {
@@ -577,6 +632,17 @@
                     <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} apiKey={geminiKey} onSave={saveSettings} />
                     <VocabularyModal isOpen={isVocabOpen} onClose={() => setIsVocabOpen(false)} words={vocabulary} onDelete={deleteVocabWord} />
                     <ConfirmModal isOpen={isReplaceConfirmOpen} title="Replace Session?" message="A session already exists. Replacing it will regenerate the transcript." onConfirm={() => { if (pendingFile) processFileUpload(pendingFile); setIsReplaceConfirmOpen(false); }} onCancel={() => setIsReplaceConfirmOpen(false)} />
+
+                    {/* Floating Add to Vocab Button */}
+                    {selectionMenu.visible && (
+                        <button 
+                            onMouseDown={(e) => { e.preventDefault(); addWordToVocab(selectionMenu.text); }}
+                            className="floating-add-btn px-4 py-2 bg-indigo-600 text-white rounded-full shadow-xl text-xs font-bold flex items-center gap-2 hover:bg-indigo-700 transition-all scale-up"
+                            style={{ top: selectionMenu.y, left: selectionMenu.x }}
+                        >
+                            <Plus size={14} /> Add "{selectionMenu.text}" to Vocab
+                        </button>
+                    )}
 
                     <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center z-20 shadow-none">
                         <div className="flex items-center gap-3"><div className="bg-black p-2 rounded-lg"><Volume2 className="text-white w-5 h-5" /></div><h1 className="text-xl font-bold text-black tracking-tight">LingoMate <span className="text-xs text-white bg-black px-1.5 ml-1 rounded-md italic font-normal">Listening Practice</span></h1></div>
