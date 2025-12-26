@@ -38,15 +38,15 @@
     <div id="root" class="h-full flex flex-col"></div>
 
     <script type="text/babel" data-type="module">
-        import React, { useState, useEffect, useRef, useCallback } from 'https://esm.sh/react@18.3.1?dev';
-        import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client?dev';
+        import React, { useState, useEffect, useRef, useCallback } from 'https://esm.sh/react@18.3.1';
+        import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
         import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
         import { 
             Play, Pause, ChevronRight, ChevronLeft, 
             Upload, FileText, History, Settings, 
             Repeat, Mic, Volume2, User, LogOut, Loader2, X, Database, Save, AlertCircle, 
             CheckCircle2, ArrowRight, Music, KeyRound, AlertTriangle, Trash2, SkipBack, SkipForward, RefreshCw, PenTool, BookOpen, Layers, Square, Circle, Eye, Book, Languages
-        } from 'https://esm.sh/lucide-react@0.344.0?dev&deps=react@18.3.1';
+        } from 'https://esm.sh/lucide-react@0.344.0';
 
         // --- CONFIGURATION ---
         const SUPABASE_URL = 'https://tnwtvxmbjwbgiwruttju.supabase.co';
@@ -61,7 +61,7 @@
             if (!isOpen) return null;
             return (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm fade-in">
-                    <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
+                    <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
                         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
                             <div className="flex items-center gap-2">
                                 {Icon && <Icon className="w-5 h-5 text-black" />}
@@ -82,17 +82,21 @@
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
             const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 setLoading(true);
-                await onLogin(email, password, mode);
+                setError(null);
+                const err = await onLogin(email, password, mode);
+                if (err) setError(err);
                 setLoading(false);
             };
 
             return (
                 <ModalLayout isOpen={isOpen} onClose={onClose} title={mode === 'login' ? "Sign In" : "Sign Up"} icon={User}>
                     <form onSubmit={handleSubmit} className="space-y-4">
+                        {error && <div className="p-3 bg-red-50 text-red-600 text-xs rounded-xl font-medium">{error}</div>}
                         <div>
                             <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Email</label>
                             <input type="email" required className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-black transition-all" value={email} onChange={e => setEmail(e.target.value)} />
@@ -175,6 +179,8 @@
         };
 
         // --- UTILS & HELPERS ---
+        const Spinner = () => <Loader2 className="w-4 h-4 animate-spin" />;
+
         const sanitizeFilename = (filename) => filename.replace(/[^a-z0-9.]/gi, '_').replace(/_+/g, '_');
 
         const getMediaDuration = (file) => new Promise((resolve) => {
@@ -207,6 +213,7 @@
                 body: JSON.stringify({ contents: [{ parts: parts }], generationConfig: { temperature: 0, responseMimeType: "application/json" } })
             });
             const data = await response.json();
+            if (!data.candidates) throw new Error(data.error?.message || "Failed to transcribe");
             const rawJson = JSON.parse(data.candidates[0].content.parts[0].text);
             return rawJson.map(s => ({ ...s, start: Math.min(s.start, totalDuration), end: Math.min(s.end, totalDuration) }));
         };
@@ -222,10 +229,9 @@
                 })
             });
             const data = await response.json();
+            if (!data.candidates) throw new Error("Failed to analyze");
             return JSON.parse(data.candidates[0].content.parts[0].text);
         };
-
-        const Spinner = () => <Loader2 className="w-4 h-4 animate-spin" />;
 
         const SmartPlayer = ({ source, isPlaying, setIsPlaying, seekTime, onTimeUpdate, loopRange }) => {
             const mediaRef = useRef(null);
@@ -317,16 +323,35 @@
             }, [transcript, seekTrigger]);
 
             useEffect(() => {
-                const storedKey = localStorage.getItem('lingomate_gemini_key');
-                if (storedKey) setGeminiKey(storedKey);
-                supabase.auth.getUser().then(({ data }) => { if (data.user) { setUser(data.user); fetchSettings(data.user.id); fetchRecordings(data.user.id); fetchVocabulary(data.user.id); } });
-                const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-                    const cu = session?.user ?? null; setUser(cu); if (cu) { fetchSettings(cu.id); fetchRecordings(cu.id); fetchVocabulary(cu.id); }
-                });
-                return () => subscription.unsubscribe();
-            }, []);
+                // Fetch user and settings safely
+                const init = async () => {
+                    try {
+                        const { data } = await supabase.auth.getUser();
+                        if (data.user) {
+                            setUser(data.user);
+                            fetchSettings(data.user.id);
+                            fetchRecordings(data.user.id);
+                            fetchVocabulary(data.user.id);
+                            fetchHistory();
+                        }
+                    } catch (err) {
+                        console.error("Initialization failed", err);
+                    }
+                };
+                init();
 
-            useEffect(() => { if (user && user.id !== 'demo-user') fetchHistory(); }, [user]);
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+                    const cu = session?.user ?? null; 
+                    setUser(cu); 
+                    if (cu) { 
+                        fetchSettings(cu.id); 
+                        fetchRecordings(cu.id); 
+                        fetchVocabulary(cu.id); 
+                        fetchHistory();
+                    }
+                });
+                return () => { if (subscription) subscription.unsubscribe(); };
+            }, []);
 
             const fetchSettings = async (uid) => {
                 const { data } = await supabase.from('user_settings').select('gemini_api_key').eq('user_id', uid).single();
@@ -335,8 +360,7 @@
 
             const saveSettings = async (nk) => {
                 setGeminiKey(nk);
-                if (user?.id !== 'demo-user') await supabase.from('user_settings').upsert({ user_id: user.id, gemini_api_key: nk });
-                localStorage.setItem('lingomate_gemini_key', nk);
+                if (user) await supabase.from('user_settings').upsert({ user_id: user.id, gemini_api_key: nk });
             };
 
             const fetchHistory = async () => {
@@ -386,7 +410,7 @@
                 try {
                     const result = await processTranscription(geminiKey, source.fileData, contextPrompt || source.title, source.duration || 0);
                     setTranscript(result);
-                    if (user?.id !== 'demo-user') {
+                    if (user) {
                         const sanitizedTitle = sanitizeFilename(source.title);
                         const filePath = `${user.id}/${Date.now()}_${sanitizedTitle}`;
                         await supabase.storage.from('media').upload(filePath, source.fileData, { cacheControl: '3600', upsert: true });
@@ -394,7 +418,9 @@
                         await supabase.from('transcripts').upsert({ user_id: user.id, title: source.title, source_type: source.mediaType, source_url: urlData.publicUrl, content: result }, { onConflict: 'user_id, title' });
                         fetchHistory();
                     }
-                } catch (err) { alert(err.message); }
+                } catch (err) { 
+                    console.error(err);
+                }
                 setIsProcessing(false);
             };
 
@@ -441,10 +467,15 @@
                 const sentence = transcript[activeIndex]?.text;
                 if (!sentence) return;
                 setIsAnalyzing(true);
-                const res = await fetchMeaningAndGrammar(geminiKey, sentence);
-                setAnalysis({ ...res, content: sentence });
-                setIsAnalyzing(false);
-                setActiveTab('Meaning and Grammar');
+                try {
+                    const res = await fetchMeaningAndGrammar(geminiKey, sentence);
+                    setAnalysis({ ...res, content: sentence });
+                    setIsAnalyzing(false);
+                    setActiveTab('Meaning and Grammar');
+                } catch (err) {
+                    console.error(err);
+                    setIsAnalyzing(false);
+                }
             };
 
             const startRecording = async () => {
@@ -457,7 +488,7 @@
                     newRecorder.start();
                     setRecorder(newRecorder);
                     setIsRecording(true);
-                } catch (e) { alert("Mic error: " + e.message); }
+                } catch (e) { console.error("Mic error", e); }
             };
 
             const stopRecording = () => {
@@ -485,6 +516,15 @@
             const deleteRecording = async (id) => {
                 await supabase.from('user_recordings').delete().eq('id', id);
                 fetchRecordings(user.id);
+            };
+
+            const handleAuth = async (email, password, mode) => {
+                const { error } = (mode === 'signup') 
+                    ? await supabase.auth.signUp({ email, password }) 
+                    : await supabase.auth.signInWithPassword({ email, password });
+                if (error) return error.message;
+                setIsLoginOpen(false);
+                return null;
             };
 
             const renderDictationSlots = () => {
@@ -533,7 +573,7 @@
 
             return (
                 <div className="h-full flex flex-col font-sans text-gray-900 bg-white fade-in overflow-hidden">
-                    <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} onLogin={async (e, p, m) => { const { error } = (m === 'signup') ? await supabase.auth.signUp({ email: e, password: p }) : await supabase.auth.signInWithPassword({ email: e, password: p }); if (!error) setIsLoginOpen(false); else alert(error.message); }} />
+                    <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} onLogin={handleAuth} />
                     <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} apiKey={geminiKey} onSave={saveSettings} />
                     <VocabularyModal isOpen={isVocabOpen} onClose={() => setIsVocabOpen(false)} words={vocabulary} onDelete={deleteVocabWord} />
                     <ConfirmModal isOpen={isReplaceConfirmOpen} title="Replace Session?" message="A session already exists. Replacing it will regenerate the transcript." onConfirm={() => { if (pendingFile) processFileUpload(pendingFile); setIsReplaceConfirmOpen(false); }} onCancel={() => setIsReplaceConfirmOpen(false)} />
