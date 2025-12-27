@@ -500,7 +500,23 @@
             };
 
             const handleReAnalyze = async () => {
-                if (!source || !source.fileData) return;
+                if (!source) return;
+                
+                // Fix for saved sessions: fetch the blob if fileData is missing
+                let fileBlob = source.fileData;
+                if (!fileBlob && source.url) {
+                    try {
+                        const res = await fetch(source.url);
+                        fileBlob = await res.blob();
+                        fileBlob.name = source.title; // Mock file name
+                    } catch (err) {
+                        console.error("Failed to load session media for analysis", err);
+                        return;
+                    }
+                }
+
+                if (!fileBlob) return;
+
                 const indicesToFix = selectedIndices.length > 0 ? selectedIndices : (activeIndex !== -1 ? [activeIndex] : []);
                 if (indicesToFix.length === 0) return;
 
@@ -510,7 +526,7 @@
                     for (const idx of indicesToFix) {
                         const segment = newTranscript[idx];
                         if (!segment) continue;
-                        const result = await fetchReAnalysis(geminiKey, source.fileData, segment.start, segment.end, correctionHint);
+                        const result = await fetchReAnalysis(geminiKey, fileBlob, segment.start, segment.end, correctionHint);
                         newTranscript[idx] = { ...segment, text: result.text };
                     }
                     setTranscript(newTranscript);
@@ -566,7 +582,6 @@
                     const end = Math.max(lastSelectedIndex, idx);
                     const range = Array.from({ length: end - start + 1 }, (_, i) => start + i);
                     setSelectedIndices(range);
-                    setLastSelectedIndex(idx);
                 } else if (e.ctrlKey || e.metaKey) {
                     if (newSelected.includes(idx)) {
                         newSelected = newSelected.filter(i => i !== idx);
@@ -753,7 +768,6 @@
                                         <div className="space-y-4 fade-in">
                                             <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={seekTrigger} onTimeUpdate={handleTimeUpdate} loopRange={loopRange} />
                                             
-                                            {/* Minimal Consolidated Control Bar */}
                                             <div className="bg-white border border-gray-100 p-4 rounded-2xl shadow-sm flex items-center justify-between px-6 transition-all">
                                                 <div className="flex items-center gap-4">
                                                     <button onClick={() => { setIsPlaying(!isPlaying); setStopAtTime(null); }} className="w-10 h-10 bg-black text-white flex items-center justify-center rounded-full hover:scale-105 active:scale-95 transition-all">
