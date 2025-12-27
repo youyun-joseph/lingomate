@@ -49,15 +49,15 @@
     <div id="root" class="h-full flex flex-col"></div>
 
     <script type="text/babel" data-type="module">
-        import React, { useState, useEffect, useRef, useCallback } from 'https://esm.sh/react@18.3.1';
-        import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
-        import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+        import React, { useState, useEffect, useRef, useCallback } from 'https://esm.sh/react@18.3.1?dev';
+        import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client?dev';
+        import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0?dev';
         import { 
             Play, Pause, ChevronRight, ChevronLeft, 
             Upload, FileText, History, Settings, 
             Repeat, Mic, Volume2, User, LogOut, Loader2, X, Database, Save, AlertCircle, 
             CheckCircle2, ArrowRight, Music, KeyRound, AlertTriangle, Trash2, SkipBack, SkipForward, RefreshCw, PenTool, BookOpen, Layers, Square, Circle, Eye, Book, Languages, Plus, Wand2, Check, ListChecks
-        } from 'https://esm.sh/lucide-react@0.344.0';
+        } from 'https://esm.sh/lucide-react@0.344.0?dev&deps=react@18.3.1';
 
         const SUPABASE_URL = 'https://tnwtvxmbjwbgiwruttju.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRud3R2eG1iandiZ2l3cnV0dGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU2NjYzNzgsImV4cCI6MjA4MTI0MjM3OH0.3AexQNzabxTLV2PbkusFwSZe7n1jsYDBJF7GB2SXhRk';
@@ -397,6 +397,7 @@
 
                 const handleMouseUp = () => {
                     const sel = window.getSelection();
+                    if (!sel.rangeCount) return;
                     const text = sel.toString().trim();
                     if (text && text.length > 0 && text.length < 50) {
                         const range = sel.getRangeAt(0);
@@ -547,14 +548,11 @@
                     setCorrectionHint("");
                     setSelectedIndices([]);
                     setLastSelectedIndex(null);
-                } catch (err) { 
-                    console.error("Re-analysis failed", err);
-                }
+                } catch (err) { console.error(err); }
                 setIsReAnalyzing(false);
             };
 
             const formatTime = (s) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
-            
             const activeIndex = transcript.findIndex((s, idx) => {
                 const nextStart = transcript[idx + 1]?.start || Infinity;
                 return currentTime >= s.start && currentTime < nextStart;
