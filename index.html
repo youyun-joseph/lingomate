@@ -49,15 +49,16 @@
     <div id="root" class="h-full flex flex-col"></div>
 
     <script type="text/babel" data-type="module">
-        import React, { useState, useEffect, useRef, useCallback } from 'https://esm.sh/react@18.3.1?dev';
-        import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client?dev';
-        import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0?dev';
+        // Using consistent non-dev versions to prevent React instance mismatch (the "Blank Page" error)
+        import React, { useState, useEffect, useRef, useCallback } from 'https://esm.sh/react@18.3.1';
+        import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
+        import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
         import { 
             Play, Pause, ChevronRight, ChevronLeft, 
             Upload, FileText, History, Settings, 
             Repeat, Mic, Volume2, User, LogOut, Loader2, X, Database, Save, AlertCircle, 
             CheckCircle2, ArrowRight, Music, KeyRound, AlertTriangle, Trash2, SkipBack, SkipForward, RefreshCw, PenTool, BookOpen, Layers, Square, Circle, Eye, Book, Languages, Plus, Wand2, Check, ListChecks
-        } from 'https://esm.sh/lucide-react@0.344.0?dev&deps=react@18.3.1';
+        } from 'https://esm.sh/lucide-react@0.344.0?deps=react@18.3.1';
 
         const SUPABASE_URL = 'https://tnwtvxmbjwbgiwruttju.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRud3R2eG1iandiZ2l3cnV0dGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU2NjYzNzgsImV4cCI6MjA4MTI0MjM3OH0.3AexQNzabxTLV2PbkusFwSZe7n1jsYDBJF7GB2SXhRk';
@@ -214,12 +215,12 @@
             let parts = [];
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                parts = [filePart, { text: `Transcribe this faithfully. Each segment must be one complete, logical sentence. Ensure timestamps are continuous (end time of segment N equals start time of segment N+1) to avoid gaps. Total duration: ${totalDuration.toFixed(2)}s. Output JSON: Array<{ text: string, start: number, end: number, speaker: string }>.` }];
+                parts = [filePart, { text: `Transcribe this audio faithfully. Each segment must be one complete, logical sentence. Ensure timestamps are strictly contiguous (end of one segment equals start of the next). Duration: ${totalDuration.toFixed(2)}s. Output JSON: Array<{ text: string, start: number, end: number, speaker: string }>.` }];
             }
             const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${effectiveKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ parts: parts }], generationConfig: { temperature: 0, responseMimeType: "application/json" } })
+                body: JSON.stringify({ contents: [{ parts: parts }], generationConfig: { temperature: 0.1, responseMimeType: "application/json" } })
             });
             const data = await response.json();
             if (!data.candidates) throw new Error(data.error?.message || "Failed to transcribe");
@@ -252,7 +253,7 @@
                     contents: [{ 
                         parts: [
                             filePart, 
-                            { text: `Re-transcribe accurately the audio between ${startTime.toFixed(2)}s and ${endTime.toFixed(2)}s. Correction hint: "${hint || 'None'}". Output strictly JSON as an array of logical segments: Array<{ text: string, start: number, end: number, speaker: string }>. Ensure segments are contiguous within this range and timestamps are accurate.` }
+                            { text: `Re-analyze the audio between ${startTime.toFixed(2)}s and ${endTime.toFixed(2)}s. Context hint: "${hint || 'None'}". Output strictly JSON as an array of logical segments: Array<{ text: string, start: number, end: number, speaker: string }>. Ensure timestamps within this range are continuous and accurate.` }
                         ] 
                     }],
                     generationConfig: { responseMimeType: "application/json" }
@@ -260,8 +261,7 @@
             });
             const data = await response.json();
             if (!data.candidates) throw new Error("Re-analysis failed");
-            const text = data.candidates[0].content.parts[0].text;
-            return JSON.parse(text);
+            return JSON.parse(data.candidates[0].content.parts[0].text);
         };
 
         const SmartPlayer = ({ source, isPlaying, setIsPlaying, seekTime, onTimeUpdate, loopRange }) => {
@@ -343,6 +343,7 @@
             // Re-analysis State
             const [correctionHint, setCorrectionHint] = useState("");
             const [isReAnalyzing, setIsReAnalyzing] = useState(false);
+            const [reAnalysisError, setReAnalysisError] = useState(null);
             const [selectedIndices, setSelectedIndices] = useState([]);
             const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
 
@@ -361,12 +362,10 @@
                 }
             }, [source]);
 
-            // Clear states on transcript change
+            // Unified State Clearer for navigation
             useEffect(() => {
                 setDictationValues({}); setDictationChecked(false); setShowDictationContent(false); setAnalysis(null);
                 setCorrectionHint("");
-                setSelectedIndices([]);
-                setLastSelectedIndex(null);
             }, [transcript]);
 
             useEffect(() => {
@@ -505,27 +504,36 @@
 
             const handleReAnalyze = async () => {
                 if (!source) return;
+                setReAnalysisError(null);
                 
                 // Fetch blob if fileData is missing (Library items)
                 let fileBlob = source.fileData;
                 if (!fileBlob && source.url) {
                     try {
                         const res = await fetch(source.url);
+                        if (!res.ok) throw new Error("Failed to fetch media file");
                         fileBlob = await res.blob();
                         fileBlob.name = source.title; 
+                        fileBlob.type = source.mediaType === 'video' ? 'video/mp4' : 'audio/mpeg';
                     } catch (err) {
-                        console.error("Failed to load session media for analysis", err);
+                        setReAnalysisError("Could not fetch the media file from the server. Please check your connection.");
                         return;
                     }
                 }
 
-                if (!fileBlob) return;
+                if (!fileBlob) {
+                    setReAnalysisError("Media file source is missing. Try re-uploading.");
+                    return;
+                }
 
                 const indicesToFix = selectedIndices.length > 0 
                     ? [...selectedIndices].sort((a, b) => a - b) 
                     : (activeIndex !== -1 ? [activeIndex] : []);
                 
-                if (indicesToFix.length === 0) return;
+                if (indicesToFix.length === 0) {
+                    setReAnalysisError("No segment selected to re-analyze.");
+                    return;
+                }
 
                 const startIdx = indicesToFix[0];
                 const endIdx = indicesToFix[indicesToFix.length - 1];
@@ -536,6 +544,8 @@
                 try {
                     const newSegments = await fetchBatchReAnalysis(geminiKey, fileBlob, startTime, endTime, correctionHint);
                     
+                    if (!Array.isArray(newSegments)) throw new Error("Invalid response format from AI");
+
                     const newTranscript = [...transcript];
                     newTranscript.splice(startIdx, (endIdx - startIdx + 1), ...newSegments);
                     
@@ -548,7 +558,9 @@
                     setCorrectionHint("");
                     setSelectedIndices([]);
                     setLastSelectedIndex(null);
-                } catch (err) { console.error(err); }
+                } catch (err) { 
+                    setReAnalysisError("Gemini failed to analyze the segment. " + err.message);
+                }
                 setIsReAnalyzing(false);
             };
 
@@ -853,6 +865,12 @@
                                                                             {selectedIndices.length > 1 ? `Fixing ${selectedIndices.length} sentences` : 'Transcript correction'}
                                                                         </h4>
                                                                     </div>
+                                                                    {reAnalysisError && (
+                                                                        <div className="p-3 bg-white border border-red-200 text-red-600 text-xs rounded-xl mb-4 font-medium flex items-start gap-2">
+                                                                            <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                                                                            {reAnalysisError}
+                                                                        </div>
+                                                                    )}
                                                                     <p className="text-xs text-red-700 mb-4 leading-relaxed">
                                                                         {selectedIndices.length > 0 
                                                                             ? `You have selected ${selectedIndices.length} items. Provide a hint to correct all of them.` 
