@@ -260,7 +260,8 @@
             });
             const data = await response.json();
             if (!data.candidates) throw new Error("Re-analysis failed");
-            return JSON.parse(data.candidates[0].content.parts[0].text);
+            const text = data.candidates[0].content.parts[0].text;
+            return JSON.parse(text);
         };
 
         const SmartPlayer = ({ source, isPlaying, setIsPlaying, seekTime, onTimeUpdate, loopRange }) => {
@@ -360,7 +361,7 @@
                 }
             }, [source]);
 
-            // Unified State Clearer for navigation - Only clear dictation/analysis state on transcript change
+            // Clear states on transcript change
             useEffect(() => {
                 setDictationValues({}); setDictationChecked(false); setShowDictationContent(false); setAnalysis(null);
                 setCorrectionHint("");
@@ -504,7 +505,7 @@
             const handleReAnalyze = async () => {
                 if (!source) return;
                 
-                // Ensure we have a blob (from Library sessions)
+                // Fetch blob if fileData is missing (Library items)
                 let fileBlob = source.fileData;
                 if (!fileBlob && source.url) {
                     try {
@@ -512,14 +513,17 @@
                         fileBlob = await res.blob();
                         fileBlob.name = source.title; 
                     } catch (err) {
-                        console.error("Failed to load session media", err);
+                        console.error("Failed to load session media for analysis", err);
                         return;
                     }
                 }
 
                 if (!fileBlob) return;
 
-                const indicesToFix = selectedIndices.length > 0 ? [...selectedIndices].sort((a, b) => a - b) : (activeIndex !== -1 ? [activeIndex] : []);
+                const indicesToFix = selectedIndices.length > 0 
+                    ? [...selectedIndices].sort((a, b) => a - b) 
+                    : (activeIndex !== -1 ? [activeIndex] : []);
+                
                 if (indicesToFix.length === 0) return;
 
                 const startIdx = indicesToFix[0];
@@ -532,7 +536,6 @@
                     const newSegments = await fetchBatchReAnalysis(geminiKey, fileBlob, startTime, endTime, correctionHint);
                     
                     const newTranscript = [...transcript];
-                    // Replace the range from startIdx to endIdx with the new array of segments
                     newTranscript.splice(startIdx, (endIdx - startIdx + 1), ...newSegments);
                     
                     setTranscript(newTranscript);
@@ -544,11 +547,14 @@
                     setCorrectionHint("");
                     setSelectedIndices([]);
                     setLastSelectedIndex(null);
-                } catch (err) { console.error(err); }
+                } catch (err) { 
+                    console.error("Re-analysis failed", err);
+                }
                 setIsReAnalyzing(false);
             };
 
             const formatTime = (s) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
+            
             const activeIndex = transcript.findIndex((s, idx) => {
                 const nextStart = transcript[idx + 1]?.start || Infinity;
                 return currentTime >= s.start && currentTime < nextStart;
@@ -710,7 +716,11 @@
             };
 
             const loadSession = (item) => { 
-                setTranscript(item.content || []); 
+                let content = item.content || [];
+                if (typeof content === 'string') {
+                    try { content = JSON.parse(content); } catch (e) { content = []; }
+                }
+                setTranscript(Array.isArray(content) ? content : []); 
                 setSource({ type: 'file', mediaType: item.source_type, url: item.source_url, title: item.title, fileData: null }); 
                 setIsPlaying(false); 
             };
