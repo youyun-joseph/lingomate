@@ -252,7 +252,7 @@
                     contents: [{ 
                         parts: [
                             filePart, 
-                            { text: `Re-transcribe accurately the audio between ${startTime.toFixed(2)}s and ${endTime.toFixed(2)}s. Correction hint: "${hint || 'None'}". Output strictly JSON as an array of logical segments: Array<{ text: string, start: number, end: number, speaker: string }>. Ensure segments are contiguous within this range.` }
+                            { text: `Re-transcribe accurately the audio between ${startTime.toFixed(2)}s and ${endTime.toFixed(2)}s. Correction hint: "${hint || 'None'}". Output strictly JSON as an array of logical segments: Array<{ text: string, start: number, end: number, speaker: string }>. Ensure segments are contiguous within this range and timestamps are accurate.` }
                         ] 
                     }],
                     generationConfig: { responseMimeType: "application/json" }
@@ -364,6 +364,8 @@
             useEffect(() => {
                 setDictationValues({}); setDictationChecked(false); setShowDictationContent(false); setAnalysis(null);
                 setCorrectionHint("");
+                setSelectedIndices([]);
+                setLastSelectedIndex(null);
             }, [transcript]);
 
             useEffect(() => {
@@ -517,13 +519,11 @@
 
                 if (!fileBlob) return;
 
-                // Determine indices to fix
-                let indices = [...selectedIndices].sort((a, b) => a - b);
-                if (indices.length === 0 && activeIndex !== -1) indices = [activeIndex];
-                if (indices.length === 0) return;
+                const indicesToFix = selectedIndices.length > 0 ? [...selectedIndices].sort((a, b) => a - b) : (activeIndex !== -1 ? [activeIndex] : []);
+                if (indicesToFix.length === 0) return;
 
-                const startIdx = indices[0];
-                const endIdx = indices[indices.length - 1];
+                const startIdx = indicesToFix[0];
+                const endIdx = indicesToFix[indicesToFix.length - 1];
                 const startTime = transcript[startIdx].start;
                 const endTime = transcript[endIdx].end;
 
@@ -544,9 +544,7 @@
                     setCorrectionHint("");
                     setSelectedIndices([]);
                     setLastSelectedIndex(null);
-                } catch (err) { 
-                    console.error("Re-analysis failed", err);
-                }
+                } catch (err) { console.error(err); }
                 setIsReAnalyzing(false);
             };
 
@@ -712,7 +710,7 @@
             };
 
             const loadSession = (item) => { 
-                setTranscript(item.content); 
+                setTranscript(item.content || []); 
                 setSource({ type: 'file', mediaType: item.source_type, url: item.source_url, title: item.title, fileData: null }); 
                 setIsPlaying(false); 
             };
