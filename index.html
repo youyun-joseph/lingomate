@@ -252,7 +252,7 @@
                     contents: [{ 
                         parts: [
                             filePart, 
-                            { text: `Re-transcribe the audio between ${startTime}s and ${endTime}s. Context hint: "${hint || 'None provided'}". Output strictly JSON: { "text": "Corrected sentence here" }.` }
+                            { text: `Re-transcribe the audio between ${startTime}s and ${endTime}s. Context hint: "${hint || 'No specific hint'}". Output strictly JSON: { "text": "Corrected sentence here" }.` }
                         ] 
                     }],
                     generationConfig: { responseMimeType: "application/json" }
@@ -360,12 +360,10 @@
                 }
             }, [source]);
 
-            // Unified State Clearer for navigation - Only clear selectedIndices/Hint on new Transcript
+            // Only clear dictation/analysis state on transcript change, NOT selection
             useEffect(() => {
                 setDictationValues({}); setDictationChecked(false); setShowDictationContent(false); setAnalysis(null);
                 setCorrectionHint("");
-                setSelectedIndices([]);
-                setLastSelectedIndex(null);
             }, [transcript]);
 
             useEffect(() => {
@@ -503,8 +501,8 @@
 
             const handleReAnalyze = async () => {
                 if (!source || !source.fileData) return;
-                const indicesToFix = selectedIndices.length > 0 ? selectedIndices : (activeIndex !== -1 ? [activeIndex] : [0]);
-                if (indicesToFix.length === 0 && transcript.length === 0) return;
+                const indicesToFix = selectedIndices.length > 0 ? selectedIndices : (activeIndex !== -1 ? [activeIndex] : []);
+                if (indicesToFix.length === 0) return;
 
                 setIsReAnalyzing(true);
                 try {
@@ -526,12 +524,6 @@
                     setLastSelectedIndex(null);
                 } catch (err) { console.error(err); }
                 setIsReAnalyzing(false);
-            };
-
-            const handleTimeUpdate = (t) => {
-                setCurrentTime(t);
-                if (stopAtTime !== null && t >= stopAtTime) { setIsPlaying(false); setStopAtTime(null); }
-                if (loopRange && isPlaying && t >= loopRange.end) setSeekTrigger(loopRange.start);
             };
 
             const formatTime = (s) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
@@ -761,7 +753,7 @@
                                         <div className="space-y-4 fade-in">
                                             <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={seekTrigger} onTimeUpdate={handleTimeUpdate} loopRange={loopRange} />
                                             
-                                            {/* Consolidated Control Bar */}
+                                            {/* Minimal Consolidated Control Bar */}
                                             <div className="bg-white border border-gray-100 p-4 rounded-2xl shadow-sm flex items-center justify-between px-6 transition-all">
                                                 <div className="flex items-center gap-4">
                                                     <button onClick={() => { setIsPlaying(!isPlaying); setStopAtTime(null); }} className="w-10 h-10 bg-black text-white flex items-center justify-center rounded-full hover:scale-105 active:scale-95 transition-all">
@@ -846,7 +838,7 @@
                                                                     />
                                                                     <button 
                                                                         onClick={handleReAnalyze}
-                                                                        disabled={isReAnalyzing || (selectedIndices.length === 0 && activeIndex === -1)}
+                                                                        disabled={isReAnalyzing || transcript.length === 0}
                                                                         className="w-full py-4 bg-red-600 text-white font-bold rounded-2xl flex items-center justify-center gap-2 hover:bg-red-700 transition-all disabled:opacity-50 disabled:bg-gray-400"
                                                                     >
                                                                         {isReAnalyzing ? <Spinner /> : <><Wand2 size={16} strokeWidth={2.5} /> Re-analyze {selectedIndices.length > 1 ? 'Selected Range' : 'Segment'}</>}
