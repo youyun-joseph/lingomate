@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LingoMate - Language Assistant</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+    <script src="[https://unpkg.com/@babel/standalone/babel.min.js](https://unpkg.com/@babel/standalone/babel.min.js)"></script>
+    <link href="[https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap](https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap)" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
         ::-webkit-scrollbar { width: 6px; }
@@ -49,18 +49,18 @@
     <div id="root" class="h-full flex flex-col"></div>
 
     <script type="text/babel" data-type="module">
-        // Using consistent non-dev versions to prevent React instance mismatch (the "Blank Page" error)
-        import React, { useState, useEffect, useRef, useCallback } from 'https://esm.sh/react@18.3.1';
-        import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
-        import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+        // Standardized imports to prevent React instance mismatch (the "Blank Page" error)
+        import React, { useState, useEffect, useRef, useCallback } from '[https://esm.sh/react@18.3.1](https://esm.sh/react@18.3.1)';
+        import { createRoot } from '[https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1](https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1)';
+        import { createClient } from '[https://esm.sh/@supabase/supabase-js@2.45.0?deps=react@18.3.1](https://esm.sh/@supabase/supabase-js@2.45.0?deps=react@18.3.1)';
         import { 
             Play, Pause, ChevronRight, ChevronLeft, 
             Upload, FileText, History, Settings, 
             Repeat, Mic, Volume2, User, LogOut, Loader2, X, Database, Save, AlertCircle, 
             CheckCircle2, ArrowRight, Music, KeyRound, AlertTriangle, Trash2, SkipBack, SkipForward, RefreshCw, PenTool, BookOpen, Layers, Square, Circle, Eye, Book, Languages, Plus, Wand2, Check, ListChecks
-        } from 'https://esm.sh/lucide-react@0.344.0?deps=react@18.3.1';
+        } from '[https://esm.sh/lucide-react@0.344.0?deps=react@18.3.1](https://esm.sh/lucide-react@0.344.0?deps=react@18.3.1)';
 
-        const SUPABASE_URL = 'https://tnwtvxmbjwbgiwruttju.supabase.co';
+        const SUPABASE_URL = '[https://tnwtvxmbjwbgiwruttju.supabase.co](https://tnwtvxmbjwbgiwruttju.supabase.co)';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRud3R2eG1iandiZ2l3cnV0dGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU2NjYzNzgsImV4cCI6MjA4MTI0MjM3OH0.3AexQNzabxTLV2PbkusFwSZe7n1jsYDBJF7GB2SXhRk';
         const DEFAULT_API_KEY = "AIzaSyArbJjcdPrq74ABOW0jzL_xOh-xY0-JFQ0"; 
 
@@ -224,7 +224,7 @@
             });
             const data = await response.json();
             if (!data.candidates) throw new Error(data.error?.message || "Failed to transcribe");
-            const rawJson = JSON.parse(data.candidates[0].content.parts[0].text);
+            const rawJson = JSON.parse(data.candidates[0].content.parts[0].text.replace(/```json|```/gi, ''));
             return rawJson.map(s => ({ ...s, start: Math.min(s.start, totalDuration), end: Math.min(s.end, totalDuration) }));
         };
 
@@ -240,7 +240,7 @@
             });
             const data = await response.json();
             if (!data.candidates) throw new Error("Failed to analyze");
-            return JSON.parse(data.candidates[0].content.parts[0].text);
+            return JSON.parse(data.candidates[0].content.parts[0].text.replace(/```json|```/gi, ''));
         };
 
         const fetchBatchReAnalysis = async (apiKey, fileObject, startTime, endTime, hint) => {
@@ -261,7 +261,8 @@
             });
             const data = await response.json();
             if (!data.candidates) throw new Error("Re-analysis failed");
-            return JSON.parse(data.candidates[0].content.parts[0].text);
+            const text = data.candidates[0].content.parts[0].text.replace(/```json|```/gi, '');
+            return JSON.parse(text);
         };
 
         const SmartPlayer = ({ source, isPlaying, setIsPlaying, seekTime, onTimeUpdate, loopRange }) => {
@@ -396,7 +397,7 @@
 
                 const handleMouseUp = () => {
                     const sel = window.getSelection();
-                    if (!sel.rangeCount) return;
+                    if (!sel || sel.rangeCount === 0) return;
                     const text = sel.toString().trim();
                     if (text && text.length > 0 && text.length < 50) {
                         const range = sel.getRangeAt(0);
@@ -506,12 +507,11 @@
                 if (!source) return;
                 setReAnalysisError(null);
                 
-                // Fetch blob if fileData is missing (Library items)
                 let fileBlob = source.fileData;
                 if (!fileBlob && source.url) {
                     try {
                         const res = await fetch(source.url);
-                        if (!res.ok) throw new Error("Failed to fetch media file");
+                        if (!res.ok) throw new Error("Fetch failed");
                         fileBlob = await res.blob();
                         fileBlob.name = source.title; 
                         fileBlob.type = source.mediaType === 'video' ? 'video/mp4' : 'audio/mpeg';
@@ -521,19 +521,13 @@
                     }
                 }
 
-                if (!fileBlob) {
-                    setReAnalysisError("Media file source is missing. Try re-uploading.");
-                    return;
-                }
+                if (!fileBlob) return;
 
                 const indicesToFix = selectedIndices.length > 0 
                     ? [...selectedIndices].sort((a, b) => a - b) 
                     : (activeIndex !== -1 ? [activeIndex] : []);
                 
-                if (indicesToFix.length === 0) {
-                    setReAnalysisError("No segment selected to re-analyze.");
-                    return;
-                }
+                if (indicesToFix.length === 0) return;
 
                 const startIdx = indicesToFix[0];
                 const endIdx = indicesToFix[indicesToFix.length - 1];
@@ -544,7 +538,7 @@
                 try {
                     const newSegments = await fetchBatchReAnalysis(geminiKey, fileBlob, startTime, endTime, correctionHint);
                     
-                    if (!Array.isArray(newSegments)) throw new Error("Invalid response format from AI");
+                    if (!Array.isArray(newSegments)) throw new Error("Invalid response format");
 
                     const newTranscript = [...transcript];
                     newTranscript.splice(startIdx, (endIdx - startIdx + 1), ...newSegments);
@@ -564,7 +558,11 @@
                 setIsReAnalyzing(false);
             };
 
-            const formatTime = (s) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
+            const formatTime = (s) => {
+                if (s === undefined || s === null) return "0:00";
+                return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
+            }
+
             const activeIndex = transcript.findIndex((s, idx) => {
                 const nextStart = transcript[idx + 1]?.start || Infinity;
                 return currentTime >= s.start && currentTime < nextStart;
@@ -794,6 +792,7 @@
                                         <div className="space-y-4 fade-in">
                                             <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={seekTrigger} onTimeUpdate={handleTimeUpdate} loopRange={loopRange} />
                                             
+                                            {/* Minimal Consolidated Control Bar */}
                                             <div className="bg-white border border-gray-100 p-4 rounded-2xl shadow-sm flex items-center justify-between px-6 transition-all">
                                                 <div className="flex items-center gap-4">
                                                     <button onClick={() => { setIsPlaying(!isPlaying); setStopAtTime(null); }} className="w-10 h-10 bg-black text-white flex items-center justify-center rounded-full hover:scale-105 active:scale-95 transition-all">
