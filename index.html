@@ -633,6 +633,7 @@
             const handleShare = (item) => {
                 const shareLink = `${window.location.origin}${window.location.pathname}?share=${item.id}`;
                 
+                // Fallback for clipboard due to iframe restrictions
                 const textArea = document.createElement("textarea");
                 textArea.value = shareLink;
                 textArea.style.position = "fixed";
@@ -853,7 +854,7 @@
                         <div className="flex items-center gap-3"><div className="bg-black p-2 rounded-lg"><Volume2 className="text-white w-5 h-5" /></div><h1 className="text-xl font-bold text-black tracking-tight">LingoMate <span className="text-xs text-white bg-black px-1.5 ml-1 rounded-md italic font-normal">Listening Practice</span></h1></div>
                         <div className="flex items-center gap-2">
                             <button onClick={() => setIsVocabOpen(true)} className="flex items-center gap-2 px-4 py-2 hover:bg-gray-50 rounded-full transition-colors font-semibold text-sm text-gray-600"><BookOpen className="w-4 h-4" /> Vocabulary</button>
-                            <button onClick={() => setIsSettingsOpen(true)} className={`p-2 transition-all ${!geminiKey ? 'text-red-500 animate-pulse' : 'text-gray-400 hover:text-black'}`}><Settings className="w-5 h-5" /></button>
+                            <button onClick={() => setIsSettingsOpen(true)} className={`p-2 transition-all ${!geminiKey ? 'text-red-500 animate-pulse' : 'text-gray-400'}`}><Settings className="w-5 h-5" /></button>
                             {user ? <div className="flex items-center gap-3 border border-gray-200 pl-3 pr-2 py-1.5 rounded-full font-medium text-sm text-gray-600"><span>{user.email?.split('@')[0]}</span><button onClick={() => { supabase.auth.signOut(); setUser(null); }} className="p-1 bg-gray-100 rounded-full hover:bg-black hover:text-white transition-colors"><LogOut className="w-4 h-4" /></button></div> : <button onClick={() => setIsLoginOpen(true)} className="px-5 py-2 bg-black text-white font-bold text-sm rounded-full transition-colors">Sign in</button>}
                         </div>
                     </header>
@@ -868,8 +869,8 @@
                                         <h3 className="font-bold text-xs truncate text-gray-800 pr-12">{item.title}</h3>
                                         <div className="flex justify-between items-center mt-2 opacity-50 text-[10px] font-medium"><span>{item.source_type}</span><span>{new Date(item.created_at).toLocaleDateString()}</span></div>
                                         <div className="absolute top-2.5 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button onClick={(e) => { e.stopPropagation(); handleShare(item); }} title="Share session" className="p-1 text-gray-400 hover:text-indigo-600 transition-colors"><Share2 size={14} /></button>
-                                            <button onClick={(e) => { e.stopPropagation(); supabase.from('transcripts').delete().eq('id', item.id).then(() => fetchHistory()); }} title="Delete session" className="p-1 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
+                                            <button onClick={(e) => { e.stopPropagation(); handleShare(item); }} title="Share session" className="p-1 text-gray-400 transition-colors"><Share2 size={14} /></button>
+                                            <button onClick={(e) => { e.stopPropagation(); supabase.from('transcripts').delete().eq('id', item.id).then(() => fetchHistory()); }} title="Delete session" className="p-1 text-gray-400 transition-colors"><Trash2 size={14} /></button>
                                         </div>
                                     </div>
                                 ))}
@@ -889,6 +890,18 @@
                                             <h3 className="font-bold text-2xl mb-2 text-gray-900">Analyze media</h3>
                                             <p className="text-gray-500 text-sm mb-8 font-normal">Upload an audio or video file to start practice.</p>
                                             <label className="block w-full bg-black text-white py-4 font-bold rounded-2xl cursor-pointer hover:bg-gray-800 shadow-lg">Select file<input type="file" className="hidden" accept="video/*,audio/*" onChange={handleFileUpload} /></label>
+                                        </div>
+                                    ) : transcript.length === 0 ? (
+                                        <div className="mt-16 bg-white p-10 flex flex-col items-center text-center rounded-3xl shadow-sm border border-gray-100">
+                                            <div className="w-12 h-12 bg-gray-50 flex items-center justify-center rounded-xl mb-4 text-gray-400"><FileText className="w-6 h-6" /></div>
+                                            <h3 className="font-bold text-lg text-gray-900 mb-2">Generate transcript</h3>
+                                            <p className="text-sm text-gray-500 mb-8 max-w-xs leading-relaxed">Generate a sentence-by-sentence transcript to start practicing.</p>
+                                            <div className="w-full space-y-4">
+                                                <input placeholder="Context (e.g. French Lesson)" className="w-full px-5 py-3.5 bg-gray-50 border-none rounded-2xl text-sm outline-none focus:ring-2 focus:ring-black transition-all" value={contextPrompt} onChange={e => setContextPrompt(e.target.value)} />
+                                                <button onClick={handleGenerate} disabled={isProcessing} className="w-full bg-black text-white py-4 font-bold rounded-2xl flex items-center justify-center gap-3 hover:bg-gray-800 disabled:opacity-50 transition-all shadow-md">
+                                                    {isProcessing ? <Spinner /> : "Generate transcript"}
+                                                </button>
+                                            </div>
                                         </div>
                                     ) : (
                                         <div className="space-y-4 fade-in">
@@ -973,8 +986,8 @@
                             <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[450px]">
                                 <h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><FileText size={16} /> Full Transcript</h2>
                                 <div className="flex items-center gap-2">
-                                    <button onClick={() => setFixPanelOpen(!fixPanelOpen)} title="Fix Transcript" className={`p-2 rounded-lg transition-all ${fixPanelOpen ? 'bg-red-100 text-red-600' : 'hover:bg-gray-200 text-gray-400'}`}><Wand2 size={18} /></button>
-                                    <button onClick={() => setTranscriptOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronRight size={18} /></button>
+                                    <button onClick={() => setFixPanelOpen(!fixPanelOpen)} title="Fix Transcript" className={`p-2 rounded-lg transition-all ${fixPanelOpen ? 'bg-red-100 text-red-600' : 'text-gray-400'}`}><Wand2 size={18} /></button>
+                                    <button onClick={() => setTranscriptOpen(false)} className="p-1.5 rounded-lg text-gray-400 transition-colors"><ChevronRight size={18} /></button>
                                 </div>
                             </div>
                             <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-[450px] custom-scrollbar pb-24 bg-gray-50/30">
@@ -986,12 +999,12 @@
                                     const isSelected = selectedIndices.includes(idx);
                                     const isActive = activeIndex === idx;
                                     return (
-                                        <div key={idx} onClick={(e) => handleSidebarClick(e, idx)} className={`group p-4 rounded-xl cursor-pointer transition-all border-2 flex gap-3 relative ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg z-10' : isActive ? 'bg-black border-black text-white shadow-md' : 'bg-white border-transparent hover:border-gray-100 text-gray-500 shadow-sm'}`}>
+                                        <div key={idx} onClick={(e) => handleSidebarClick(e, idx)} className={`group p-4 rounded-xl cursor-pointer transition-all border-2 flex gap-3 relative ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg z-10' : isActive ? 'bg-black border-black text-white shadow-md' : 'bg-white border-transparent text-gray-500 shadow-sm'}`}>
                                             <div className="pt-0.5 shrink-0"><div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${isSelected ? 'bg-white border-white text-indigo-600' : isActive ? 'bg-white/20 border-white/40 text-transparent' : 'bg-gray-50 border-gray-200 text-transparent group-hover:border-gray-300'}`}>{isSelected && <Check size={14} strokeWidth={4} className="fade-in" />}</div></div>
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex justify-between items-center mb-1 text-[9px] font-bold uppercase tracking-wider opacity-60"><span>{s.speaker || 'Speaker'}</span><span>{formatTime(s.start)} - {formatTime(s.end)}</span></div>
                                                 <p className="text-sm font-medium leading-relaxed pr-8">{s.text}</p>
-                                                {(isSelected || isActive) && (<button title="Select all segments after this" onClick={(e) => { e.stopPropagation(); selectAllAfter(idx); }} className={`absolute right-3 bottom-3 p-1.5 rounded-lg transition-all ${isSelected ? 'bg-white/20 hover:bg-white/30 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'}`}><ListChecks size={14} /></button>)}
+                                                {(isSelected || isActive) && (<button title="Select all segments after this" onClick={(e) => { e.stopPropagation(); selectAllAfter(idx); }} className={`absolute right-3 bottom-3 p-1.5 rounded-lg transition-all ${isSelected ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'}`}><ListChecks size={14} /></button>)}
                                             </div>
                                         </div>
                                     );
