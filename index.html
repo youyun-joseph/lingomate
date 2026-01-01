@@ -222,6 +222,10 @@
         // --- UPDATED SANITIZATION LOGIC ---
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
+            
+            // GLOBAL HARD LIMIT: No segment can exceed 20 seconds.
+            // This prevents "paragraph hallucinations" from desyncing the file.
+            const HARD_MAX_DURATION = 20.0;
 
             // 1. Sort by start time strictly
             const sorted = rawSegments.sort((a, b) => a.start - b.start);
@@ -234,36 +238,37 @@
                 if (start >= totalDuration) return null; // Starts after file ends
                 if (end > totalDuration) end = totalDuration;
 
-                // B. Tighter Heuristic: 0.2s per char + 2.0s buffer.
-                // Prevents sentences from dragging on too long if the AI hallucinates duration.
-                const maxDuration = (text.length * 0.2) + 2.0;
-                if (end - start > maxDuration) {
-                    end = start + maxDuration;
+                // B. Hard Cap (The "Hammer" Fix)
+                if (end - start > HARD_MAX_DURATION) {
+                    end = start + HARD_MAX_DURATION;
                 }
 
-                // C. Strict Overlap Removal (The "Next Segment Wall")
+                // C. Speech Rate Heuristic (Fine tuning)
+                // 0.2s per char + 2s buffer. (e.g., "Hello" = 3s max)
+                const textBasedMax = (text.length * 0.2) + 2.0;
+                if (end - start > textBasedMax) {
+                    end = start + textBasedMax;
+                }
+
+                // D. Strict Overlap Removal
                 if (index < sorted.length - 1) {
                     const nextStart = sorted[index + 1].start;
-                    // If this segment ends after the next one starts, cut it off.
-                    // We give a tiny 0.01s buffer to prevent perfect timestamp collision bugs.
                     if (end > nextStart - 0.01) {
                         end = Math.max(start, nextStart - 0.01);
                     }
                 }
 
-                // D. Sanity Check: If the segment became effectively zero length (< 0.1s) due to overlap crushing, drop it.
-                // We do NOT extend the duration here, because that would re-create the overlap.
+                // E. Drop ghost segments (< 0.1s)
                 if (end - start < 0.1) return null;
 
                 return { start, end, text, speaker };
-            }).filter(Boolean); // Filter out nulls
+            }).filter(Boolean);
         };
 
         const processTranscription = async (apiKey, fileObject = null, contextText = "", totalDuration = 0) => {
             const effectiveKey = apiKey || DEFAULT_API_KEY;
             let parts = [];
             
-            // Format duration for the prompt (e.g., "120.5 seconds")
             const durationStr = totalDuration ? `${totalDuration.toFixed(2)}` : "unknown";
 
             if (fileObject) {
@@ -276,9 +281,9 @@
 
                 STRICT REQUIREMENTS:
                 1. Split into clear, logical full sentences.
-                2. TIMESTAMPS MUST BE ACCURATE. 
-                3. CRITICAL: Do not output timestamps greater than ${durationStr} seconds.
-                4. CRITICAL: If there is silence or music between sentences, DO NOT extend the segment 'end' time to cover the silence. End the segment immediately when the voice stops.
+                2. CRITICAL: Split long sentences into smaller phrases if they exceed 15 seconds.
+                3. TIMESTAMPS MUST BE ACCURATE. Do not output timestamps greater than ${durationStr} seconds.
+                4. If there is silence between sentences, DO NOT extend the segment 'end' time to cover the silence.
                 
                 Output JSON: Array<{ text: string, start: number, end: number, speaker: string }>.` }];
             }
@@ -294,7 +299,6 @@
             
             const rawJson = JSON.parse(data.candidates[0].content.parts[0].text.replace(/```json|```/gi, '').trim());
             
-            // Apply the sanitization fix
             const fixedJson = rawJson.map(s => ({ ...s, start: Number(s.start.toFixed(2)), end: Number(s.end.toFixed(2)) }));
             return sanitizeTranscript(fixedJson, totalDuration);
         };
