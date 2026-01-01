@@ -278,7 +278,8 @@
             return JSON.parse(text);
         };
 
-        const SmartPlayer = ({ source, isPlaying, setIsPlaying, seekTime, onTimeUpdate, loopRange }) => {
+        // --- UPDATED SMART PLAYER COMPONENT ---
+        const SmartPlayer = ({ source, isPlaying, setIsPlaying, seekTime, onTimeUpdate, loopRange, seekTrigger }) => {
             const mediaRef = useRef(null);
 
             useEffect(() => {
@@ -288,11 +289,12 @@
                 }
             }, [isPlaying]);
 
+            // UPDATED: Now depends on seekTrigger instead of seekTime to prevent stutter
             useEffect(() => {
                 if (mediaRef.current && seekTime !== undefined) {
                     mediaRef.current.currentTime = seekTime;
                 }
-            }, [seekTime]);
+            }, [seekTrigger]);
 
             if (source.mediaType === 'video') {
                 return (
@@ -903,7 +905,8 @@
                                         </div>
                                     ) : (
                                         <div className="space-y-4 fade-in">
-                                            <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={currentTime} onTimeUpdate={handleTimeUpdate} loopRange={loopRange} />
+                                            {/* UPDATED: Pass seekTrigger prop */}
+                                            <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={currentTime} onTimeUpdate={handleTimeUpdate} loopRange={loopRange} seekTrigger={seekTrigger} />
                                             
                                             <div className="bg-white border border-gray-100 p-4 rounded-2xl shadow-sm flex items-center justify-between px-6 transition-all">
                                                 <div className="flex items-center gap-4">
