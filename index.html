@@ -219,26 +219,91 @@
             return { inlineData: { data: base64, mimeType: file.type || 'application/octet-stream' } };
         };
 
+        // --- NEW HELPER: Fixes timestamp drift and boundary errors ---
+        const sanitizeTranscript = (rawSegments, totalDuration) => {
+            if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
+
+            // 1. Sort by start time to ensure order
+            const sorted = rawSegments.sort((a, b) => a.start - b.start);
+
+            return sorted.map((seg, index) => {
+                let { start, end, text, speaker } = seg;
+                
+                // --- SPEECH RATE HEURISTIC FIX ---
+                // Calculate raw duration
+                const duration = end - start;
+                
+                // Maximum allowed duration based on text length.
+                // Formula: (Characters * 0.3s) + 3s Buffer.
+                // E.g. "Hello" (5 chars) -> Max 4.5s. 
+                // This prevents short sentences from dragging on for 30s.
+                const estimatedMaxDuration = (text.length * 0.3) + 3.0;
+
+                if (duration > estimatedMaxDuration) {
+                    end = start + estimatedMaxDuration;
+                }
+                // --------------------------------
+
+                // 2. Clamp Start: Cannot start after file ends
+                if (start >= totalDuration) return null; 
+
+                // 3. Clamp End: Cannot end after file ends
+                if (end > totalDuration) end = totalDuration;
+
+                // 4. Fix "Drift" / Overlap: 
+                // If the next segment starts BEFORE this one ends, cut this one short.
+                if (index < sorted.length - 1) {
+                    const nextStart = sorted[index + 1].start;
+                    if (end > nextStart) {
+                        end = nextStart;
+                    }
+                }
+
+                // 5. Minimum Duration Sanity Check
+                if (end <= start) end = start + 0.5; 
+
+                return { start, end, text, speaker };
+            }).filter(Boolean); // Remove nulls
+        };
+
         const processTranscription = async (apiKey, fileObject = null, contextText = "", totalDuration = 0) => {
             const effectiveKey = apiKey || DEFAULT_API_KEY;
             let parts = [];
+            
+            // Format duration for the prompt (e.g., "120.5 seconds")
+            const durationStr = totalDuration ? `${totalDuration.toFixed(2)}` : "unknown";
+
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                parts = [filePart, { text: `Act as an elite speech-to-text engine. Transcribe this audio faithfully. 
-                Requirements:
-                - Split into clear, logical full sentences.
-                - Precise timestamps: Strictly align timestamps with audio or video. Match speech boundaries exactly. 
+                parts = [filePart, { text: `Act as an elite speech-to-text engine. Transcribe this audio faithfully.
+                
+                METADATA:
+                - Context: ${contextText}
+                - Total File Duration: ${durationStr} seconds.
+
+                STRICT REQUIREMENTS:
+                1. Split into clear, logical full sentences.
+                2. TIMESTAMPS MUST BE ACCURATE. 
+                3. CRITICAL: Do not output timestamps greater than ${durationStr} seconds.
+                4. CRITICAL: If there is silence or music between sentences, DO NOT extend the segment 'end' time to cover the silence. End the segment immediately when the voice stops.
+                
                 Output JSON: Array<{ text: string, start: number, end: number, speaker: string }>.` }];
             }
+
             const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${effectiveKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ contents: [{ parts: parts }], generationConfig: { temperature: 0.1, responseMimeType: "application/json" } })
             });
+
             const data = await response.json();
             if (!data.candidates) throw new Error(data.error?.message || "Failed to transcribe");
+            
             const rawJson = JSON.parse(data.candidates[0].content.parts[0].text.replace(/```json|```/gi, '').trim());
-            return rawJson.map(s => ({ ...s, start: Number(s.start.toFixed(2)), end: Number(s.end.toFixed(2)) }));
+            
+            // Apply the sanitization fix
+            const fixedJson = rawJson.map(s => ({ ...s, start: Number(s.start.toFixed(2)), end: Number(s.end.toFixed(2)) }));
+            return sanitizeTranscript(fixedJson, totalDuration);
         };
 
         const fetchMeaningAndGrammar = async (apiKey, sentence) => {
@@ -278,7 +343,6 @@
             return JSON.parse(text);
         };
 
-        // --- UPDATED SMART PLAYER COMPONENT ---
         const SmartPlayer = ({ source, isPlaying, setIsPlaying, seekTime, onTimeUpdate, loopRange, seekTrigger }) => {
             const mediaRef = useRef(null);
 
@@ -905,7 +969,6 @@
                                         </div>
                                     ) : (
                                         <div className="space-y-4 fade-in">
-                                            {/* UPDATED: Pass seekTrigger prop */}
                                             <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={currentTime} onTimeUpdate={handleTimeUpdate} loopRange={loopRange} seekTrigger={seekTrigger} />
                                             
                                             <div className="bg-white border border-gray-100 p-4 rounded-2xl shadow-sm flex items-center justify-between px-6 transition-all">
