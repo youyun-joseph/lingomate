@@ -219,51 +219,44 @@
             return { inlineData: { data: base64, mimeType: file.type || 'application/octet-stream' } };
         };
 
-        // --- NEW HELPER: Fixes timestamp drift and boundary errors ---
+        // --- UPDATED SANITIZATION LOGIC ---
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
 
-            // 1. Sort by start time to ensure order
+            // 1. Sort by start time strictly
             const sorted = rawSegments.sort((a, b) => a.start - b.start);
 
             return sorted.map((seg, index) => {
                 let { start, end, text, speaker } = seg;
-                
-                // --- SPEECH RATE HEURISTIC FIX ---
-                // Calculate raw duration
-                const duration = end - start;
-                
-                // Maximum allowed duration based on text length.
-                // Formula: (Characters * 0.3s) + 3s Buffer.
-                // E.g. "Hello" (5 chars) -> Max 4.5s. 
-                // This prevents short sentences from dragging on for 30s.
-                const estimatedMaxDuration = (text.length * 0.3) + 3.0;
 
-                if (duration > estimatedMaxDuration) {
-                    end = start + estimatedMaxDuration;
-                }
-                // --------------------------------
-
-                // 2. Clamp Start: Cannot start after file ends
-                if (start >= totalDuration) return null; 
-
-                // 3. Clamp End: Cannot end after file ends
+                // A. Basic Clamps
+                if (start < 0) start = 0;
+                if (start >= totalDuration) return null; // Starts after file ends
                 if (end > totalDuration) end = totalDuration;
 
-                // 4. Fix "Drift" / Overlap: 
-                // If the next segment starts BEFORE this one ends, cut this one short.
+                // B. Tighter Heuristic: 0.2s per char + 2.0s buffer.
+                // Prevents sentences from dragging on too long if the AI hallucinates duration.
+                const maxDuration = (text.length * 0.2) + 2.0;
+                if (end - start > maxDuration) {
+                    end = start + maxDuration;
+                }
+
+                // C. Strict Overlap Removal (The "Next Segment Wall")
                 if (index < sorted.length - 1) {
                     const nextStart = sorted[index + 1].start;
-                    if (end > nextStart) {
-                        end = nextStart;
+                    // If this segment ends after the next one starts, cut it off.
+                    // We give a tiny 0.01s buffer to prevent perfect timestamp collision bugs.
+                    if (end > nextStart - 0.01) {
+                        end = Math.max(start, nextStart - 0.01);
                     }
                 }
 
-                // 5. Minimum Duration Sanity Check
-                if (end <= start) end = start + 0.5; 
+                // D. Sanity Check: If the segment became effectively zero length (< 0.1s) due to overlap crushing, drop it.
+                // We do NOT extend the duration here, because that would re-create the overlap.
+                if (end - start < 0.1) return null;
 
                 return { start, end, text, speaker };
-            }).filter(Boolean); // Remove nulls
+            }).filter(Boolean); // Filter out nulls
         };
 
         const processTranscription = async (apiKey, fileObject = null, contextText = "", totalDuration = 0) => {
