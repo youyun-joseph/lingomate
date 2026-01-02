@@ -280,6 +280,18 @@
             }).filter(Boolean);
         };
 
+        const callGemini = async (apiKey, model, body) => {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await response.json();
+            if (data.error) throw new Error(data.error.message);
+            if (!data.candidates) throw new Error("No response from AI");
+            return data;
+        };
+
         const processTranscription = async (apiKey, fileObject = null, contextText = "", totalDuration = 0) => {
             const effectiveKey = apiKey || DEFAULT_API_KEY;
             let parts = [];
@@ -287,7 +299,7 @@
 
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                // PROMPT: Force Word-Level output for precise alignment
+                // PROMPT UPDATE: Use Pipe-Delimited format to save tokens and prevent JSON parsing errors
                 parts = [filePart, { text: `Act as a precision alignment engine. Transcribe the audio into INDIVIDUAL WORDS with exact timestamps.
                 
                 METADATA:
@@ -295,103 +307,98 @@
                 - Total Duration: ${durationStr}s
 
                 STRICT OUTPUT REQUIREMENTS:
-                1. Output a JSON Array of word objects: { "word": "string", "start": number, "end": number }.
-                2. "word" must include attached punctuation (e.g. "Hello,", "World!").
-                3. Do NOT group words into sentences. I need granular word-level data.
-                4. Ensure timestamps are accurate to the millisecond.
-                5. Do NOT hallucinate words or silence.
+                1. Output strictly a list of words in this format: Word|Start|End
+                2. One word per line.
+                3. Do NOT use JSON. Do not use Markdown. Just raw text.
+                4. "Word" must include punctuation (e.g. Hello,|0.0|0.5).
+                5. Do NOT hallucinate.
                 
-                Output JSON: Array<{ word: string, start: number, end: number }>.` }];
+                Example Output:
+                Hello|0.00|0.50
+                world!|0.51|1.00
+                How|1.05|1.20
+                are|1.21|1.40
+                you?|1.41|1.90` }];
             }
 
-            // MODEL FIXED: Using 'gemini-2.0-flash-exp' which is currently valid
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${effectiveKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ parts: parts }], generationConfig: { temperature: 0.0, responseMimeType: "application/json" } })
-            });
-
-            const data = await response.json();
-            
-            if (data.error) {
-                throw new Error("API Error: " + data.error.message);
-            }
-            if (!data.candidates) throw new Error("Failed to transcribe: No candidates returned");
-            
-            // CLEANER JSON PARSING WITH REPAIR
-            let rawText = data.candidates[0].content.parts[0].text;
-            const firstBracket = rawText.indexOf('[');
-            const lastBracket = rawText.lastIndexOf(']');
-            
-            if (firstBracket !== -1 && lastBracket !== -1) {
-                rawText = rawText.substring(firstBracket, lastBracket + 1);
-            }
-            
-            let rawJson;
+            // FALLBACK SYSTEM: Try 3-flash-preview, fall back to 1.5-flash if needed
+            let rawText = "";
             try {
-                rawJson = JSON.parse(rawText);
-            } catch (e) {
-                console.warn("JSON Parse Error, attempting repair:", e);
-                // Attempt to repair truncated JSON by closing the array
-                try {
-                    rawJson = JSON.parse(rawText.trim() + ']');
-                } catch (e2) {
-                    throw new Error("Failed to parse transcript. Audio might be too long.");
+                // Try the latest fast model first
+                const data = await callGemini(effectiveKey, "gemini-3-flash-preview", { 
+                    contents: [{ parts: parts }], 
+                    generationConfig: { temperature: 0.0 } 
+                });
+                rawText = data.candidates[0].content.parts[0].text;
+            } catch (err) {
+                console.warn("Gemini 3.0 failed, falling back to 2.0", err);
+                // Fallback to stable model
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
+                    contents: [{ parts: parts }], 
+                    generationConfig: { temperature: 0.0 } 
+                });
+                rawText = data.candidates[0].content.parts[0].text;
+            }
+            
+            // ROBUST PARSING: Parse the Pipe-Delimited Text
+            const lines = rawText.split('\n');
+            const wordSegments = [];
+            
+            for (const line of lines) {
+                const parts = line.trim().split('|');
+                if (parts.length >= 3) {
+                    const word = parts[0].trim();
+                    const start = parseFloat(parts[1]);
+                    const end = parseFloat(parts[2]);
+                    
+                    if (word && !isNaN(start) && !isNaN(end)) {
+                        wordSegments.push({ word, start, end });
+                    }
                 }
             }
 
-            const assembledSentences = assembleSentences(rawJson);
+            if (wordSegments.length === 0) throw new Error("Failed to parse transcript format. Please check API key.");
+
+            const assembledSentences = assembleSentences(wordSegments);
             return sanitizeTranscript(assembledSentences, totalDuration);
         };
 
         const fetchMeaningAndGrammar = async (apiKey, sentence) => {
             const effectiveKey = apiKey || DEFAULT_API_KEY;
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${effectiveKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: `Analyze: "${sentence}". Provide translation and key grammar. ALL EXPLANATIONS MUST BE IN CHINESE SIMPLIFIED (简体中文). Output strictly JSON: { "meaning": "...", "grammar": "..." }.` }] }],
-                    generationConfig: { responseMimeType: "application/json" }
-                })
-            });
-            const data = await response.json();
-            if (data.error) throw new Error(data.error.message);
-            if (!data.candidates) throw new Error("Failed to analyze");
-            let rawText = data.candidates[0].content.parts[0].text;
-            const firstBracket = rawText.indexOf('{');
-            const lastBracket = rawText.lastIndexOf('}');
-            if (firstBracket !== -1 && lastBracket !== -1) {
-                rawText = rawText.substring(firstBracket, lastBracket + 1);
+            const body = {
+                contents: [{ parts: [{ text: `Analyze: "${sentence}". Provide translation and key grammar. ALL EXPLANATIONS MUST BE IN CHINESE SIMPLIFIED (简体中文). Output strictly JSON: { "meaning": "...", "grammar": "..." }.` }] }],
+                generationConfig: { responseMimeType: "application/json" }
+            };
+            
+            try {
+                const data = await callGemini(effectiveKey, "gemini-3-flash-preview", body);
+                return JSON.parse(data.candidates[0].content.parts[0].text);
+            } catch (e) {
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+                return JSON.parse(data.candidates[0].content.parts[0].text);
             }
-            return JSON.parse(rawText);
         };
 
         const fetchBatchReAnalysis = async (apiKey, fileObject, startTime, endTime, hint) => {
              const effectiveKey = apiKey || DEFAULT_API_KEY;
              const filePart = await fileToGenerativePart(fileObject);
-             const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${effectiveKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ 
-                        parts: [
-                            filePart, 
-                            { text: `Re-analyze accurately the audio between ${startTime.toFixed(2)}s and ${endTime.toFixed(2)}s. Correction hint: "${hint || 'None'}". Output strictly JSON as an array of logical segments: Array<{ text: string, start: number, end: number, speaker: string }>. Ensure segments are contiguous within this range and timestamps are accurate.` }
-                        ] 
-                    }],
-                    generationConfig: { responseMimeType: "application/json" }
-                })
-            });
-            const data = await response.json();
-            if (data.error) throw new Error(data.error.message);
-            if (!data.candidates) throw new Error("Re-analysis failed");
-            let rawText = data.candidates[0].content.parts[0].text;
-            const firstBracket = rawText.indexOf('[');
-            const lastBracket = rawText.lastIndexOf(']');
-            if (firstBracket !== -1 && lastBracket !== -1) {
-                rawText = rawText.substring(firstBracket, lastBracket + 1);
+             const body = {
+                contents: [{ 
+                    parts: [
+                        filePart, 
+                        { text: `Re-analyze accurately the audio between ${startTime.toFixed(2)}s and ${endTime.toFixed(2)}s. Correction hint: "${hint || 'None'}". Output strictly JSON as an array of logical segments: Array<{ text: string, start: number, end: number, speaker: string }>.` }
+                    ] 
+                }],
+                generationConfig: { responseMimeType: "application/json" }
+            };
+
+            try {
+                const data = await callGemini(effectiveKey, "gemini-3-flash-preview", body);
+                return JSON.parse(data.candidates[0].content.parts[0].text);
+            } catch (e) {
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+                return JSON.parse(data.candidates[0].content.parts[0].text);
             }
-            return JSON.parse(rawText);
         };
 
         const SmartPlayer = ({ source, isPlaying, setIsPlaying, seekTime, onTimeUpdate, loopRange, seekTrigger }) => {
@@ -978,7 +985,7 @@
 
                     <div className="flex-1 flex overflow-hidden">
                         <aside className={`${sidebarOpen ? 'w-80 border-r' : 'w-0'} bg-white transition-all duration-300 overflow-hidden flex flex-col z-10 relative`}>
-                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[450px]"><h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><History className="w-4 h-4" /> Library</h2><button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronLeft className="w-4 h-4" /></button></div>
+                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[320px]"><h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><History className="w-4 h-4" /> Library</h2><button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronLeft className="w-4 h-4" /></button></div>
                             <div className="flex-1 overflow-y-auto p-3 space-y-2 min-w-[320px] custom-scrollbar">
                                 {history.length === 0 && <div className="text-center p-8 opacity-20"><Database className="w-8 h-8 mx-auto mb-2" /><p className="text-xs font-semibold">No files saved</p></div>}
                                 {history.map(item => (
