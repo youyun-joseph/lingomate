@@ -219,19 +219,22 @@
             return { inlineData: { data: base64, mimeType: file.type || 'application/octet-stream' } };
         };
 
-        // --- NEW: Assembly Engine to Stitch Words into Sentences ---
+        // --- UPDATED: Strict "First Word to Last Word" Assembly ---
         const assembleSentences = (wordSegments) => {
             if (!wordSegments) return [];
             const sentences = [];
             let currentSentenceWords = [];
-            let currentStart = null;
+            
+            // Temporary storage for the start time of the CURRENT sentence
+            let sentenceStartTime = null;
 
             wordSegments.forEach((w, index) => {
                 const wordClean = w.word.trim();
                 if (!wordClean) return;
 
+                // 1. Capture the start time of the VERY FIRST word in the sentence
                 if (currentSentenceWords.length === 0) {
-                    currentStart = w.start;
+                    sentenceStartTime = w.start;
                 }
                 
                 currentSentenceWords.push(wordClean);
@@ -242,11 +245,21 @@
 
                 if (isEndOfSentence || isLastWord) {
                     const text = currentSentenceWords.join(' ');
-                    const end = w.end; 
-                    sentences.push({ text, start: currentStart, end, speaker: w.speaker || "Speaker" });
                     
+                    // 2. Capture the end time of the VERY LAST word in the sentence
+                    const sentenceEndTime = w.end; 
+                    
+                    // 3. Push the sentence with exact First-to-Last boundaries
+                    sentences.push({ 
+                        text, 
+                        start: sentenceStartTime, 
+                        end: sentenceEndTime, 
+                        speaker: w.speaker || "Speaker" 
+                    });
+                    
+                    // Reset
                     currentSentenceWords = [];
-                    currentStart = null;
+                    sentenceStartTime = null;
                 }
             });
             return sentences;
@@ -255,25 +268,26 @@
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
             
+            // Sort strictly by start time
             const sorted = rawSegments.sort((a, b) => a.start - b.start);
 
             return sorted.map((seg, index) => {
                 let { start, end, text, speaker } = seg;
 
+                // A. Basic bounds check
                 if (start < 0) start = 0;
                 if (start >= totalDuration) return null;
                 if (end > totalDuration) end = totalDuration;
 
+                // B. Overlap Prevention (Only needed if the AI hallucinated overlapping words)
                 if (index < sorted.length - 1) {
                     const nextStart = sorted[index + 1].start;
                     if (end > nextStart) {
-                        end = nextStart; 
-                    }
-                    if (nextStart - end < 0.5 && nextStart - end > 0) {
-                        end = nextStart;
+                        end = nextStart; // Cut if overlapping
                     }
                 }
 
+                // C. Sanity check: ensure positive duration
                 if (end <= start) end = start + 0.1;
 
                 return { start, end, text, speaker };
@@ -299,7 +313,7 @@
 
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                // PROMPT UPDATE: Use Pipe-Delimited format to save tokens and prevent JSON parsing errors
+                // PROMPT: Request Millisecond Precision
                 parts = [filePart, { text: `Act as a precision alignment engine. Transcribe the audio into INDIVIDUAL WORDS with exact timestamps.
                 
                 METADATA:
@@ -308,23 +322,20 @@
 
                 STRICT OUTPUT REQUIREMENTS:
                 1. Output strictly a list of words in this format: Word|Start|End
-                2. One word per line.
-                3. Do NOT use JSON. Do not use Markdown. Just raw text.
-                4. "Word" must include punctuation (e.g. Hello,|0.0|0.5).
-                5. Do NOT hallucinate.
+                2. Use MILLISECOND precision (e.g. 0.125).
+                3. One word per line.
+                4. Do NOT use JSON. Do not use Markdown. Just raw text.
+                5. "Word" must include punctuation (e.g. Hello,|0.000|0.500).
                 
                 Example Output:
-                Hello|0.00|0.50
-                world!|0.51|1.00
-                How|1.05|1.20
-                are|1.21|1.40
-                you?|1.41|1.90` }];
+                Hello|0.000|0.500
+                world!|0.510|1.000` }];
             }
 
-            // FALLBACK SYSTEM: Try 3-flash-preview, fall back to 1.5-flash if needed
+            // FALLBACK SYSTEM: Try 3-flash, fall back to 2.0-flash if needed
             let rawText = "";
             try {
-                // Try the latest fast model first
+                // Trying Gemini 3 Flash Preview as requested
                 const data = await callGemini(effectiveKey, "gemini-3-flash-preview", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0 } 
@@ -332,7 +343,7 @@
                 rawText = data.candidates[0].content.parts[0].text;
             } catch (err) {
                 console.warn("Gemini 3.0 failed, falling back to 2.0", err);
-                // Fallback to stable model
+                // Fallback to Gemini 2.0 Flash Exp
                 const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0 } 
@@ -340,7 +351,7 @@
                 rawText = data.candidates[0].content.parts[0].text;
             }
             
-            // ROBUST PARSING: Parse the Pipe-Delimited Text
+            // ROBUST PARSING
             const lines = rawText.split('\n');
             const wordSegments = [];
             
