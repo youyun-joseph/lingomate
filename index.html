@@ -219,22 +219,19 @@
             return { inlineData: { data: base64, mimeType: file.type || 'application/octet-stream' } };
         };
 
-        // --- UPDATED: Strict "First Word to Last Word" Assembly ---
+        // --- NEW: Assembly Engine to Stitch Words into Sentences ---
         const assembleSentences = (wordSegments) => {
             if (!wordSegments) return [];
             const sentences = [];
             let currentSentenceWords = [];
-            
-            // Temporary storage for the start time of the CURRENT sentence
-            let sentenceStartTime = null;
+            let currentStart = null;
 
             wordSegments.forEach((w, index) => {
                 const wordClean = w.word.trim();
                 if (!wordClean) return;
 
-                // 1. Capture the start time of the VERY FIRST word in the sentence
                 if (currentSentenceWords.length === 0) {
-                    sentenceStartTime = w.start;
+                    currentStart = w.start;
                 }
                 
                 currentSentenceWords.push(wordClean);
@@ -245,50 +242,55 @@
 
                 if (isEndOfSentence || isLastWord) {
                     const text = currentSentenceWords.join(' ');
+                    const end = w.end; 
+                    sentences.push({ text, start: currentStart, end, speaker: w.speaker || "Speaker" });
                     
-                    // 2. Capture the end time of the VERY LAST word in the sentence
-                    const sentenceEndTime = w.end; 
-                    
-                    // 3. Push the sentence with exact First-to-Last boundaries
-                    sentences.push({ 
-                        text, 
-                        start: sentenceStartTime, 
-                        end: sentenceEndTime, 
-                        speaker: w.speaker || "Speaker" 
-                    });
-                    
-                    // Reset
                     currentSentenceWords = [];
-                    sentenceStartTime = null;
+                    currentStart = null;
                 }
             });
             return sentences;
         };
 
+        // --- UPDATED: CHAIN LINKING LOGIC ---
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
             
-            // Sort strictly by start time
+            // 1. Sort strictly
             const sorted = rawSegments.sort((a, b) => a.start - b.start);
 
             return sorted.map((seg, index) => {
                 let { start, end, text, speaker } = seg;
 
-                // A. Basic bounds check
                 if (start < 0) start = 0;
-                if (start >= totalDuration) return null;
-                if (end > totalDuration) end = totalDuration;
-
-                // B. Overlap Prevention (Only needed if the AI hallucinated overlapping words)
+                
+                // --- CHAIN LINKING ---
                 if (index < sorted.length - 1) {
                     const nextStart = sorted[index + 1].start;
-                    if (end > nextStart) {
-                        end = nextStart; // Cut if overlapping
+                    
+                    // IF there is a gap between this sentence and the next one...
+                    if (nextStart > end) {
+                        const gap = nextStart - end;
+                        // If gap is small (< 2.0s), assume it's part of the sentence flow (breath/pause)
+                        // and extend this sentence to meet the next one.
+                        if (gap < 2.0) {
+                            end = nextStart;
+                        }
+                    } 
+                    // IF there is an overlap (this sentence ends AFTER next starts)...
+                    else {
+                        // Snap back to avoid collision
+                        end = nextStart;
+                    }
+                } else {
+                    // Last sentence: extend to end of file (max 5s buffer)
+                    if (totalDuration && (totalDuration - end < 5.0)) {
+                        end = totalDuration;
                     }
                 }
 
-                // C. Sanity check: ensure positive duration
-                if (end <= start) end = start + 0.1;
+                // Sanity check: Ensure positive duration
+                if (end <= start) end = start + 0.5;
 
                 return { start, end, text, speaker };
             }).filter(Boolean);
@@ -313,7 +315,7 @@
 
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                // PROMPT: Request Millisecond Precision
+                // PROMPT UPDATE: Pipe-Delimited format + Continuous Request
                 parts = [filePart, { text: `Act as a precision alignment engine. Transcribe the audio into INDIVIDUAL WORDS with exact timestamps.
                 
                 METADATA:
@@ -322,20 +324,23 @@
 
                 STRICT OUTPUT REQUIREMENTS:
                 1. Output strictly a list of words in this format: Word|Start|End
-                2. Use MILLISECOND precision (e.g. 0.125).
-                3. One word per line.
-                4. Do NOT use JSON. Do not use Markdown. Just raw text.
-                5. "Word" must include punctuation (e.g. Hello,|0.000|0.500).
+                2. One word per line.
+                3. Do NOT use JSON. Do not use Markdown. Just raw text.
+                4. "Word" must include punctuation (e.g. Hello,|0.0|0.5).
+                5. Do NOT hallucinate.
                 
                 Example Output:
-                Hello|0.000|0.500
-                world!|0.510|1.000` }];
+                Hello|0.00|0.50
+                world!|0.51|1.00
+                How|1.05|1.20
+                are|1.21|1.40
+                you?|1.41|1.90` }];
             }
 
             // FALLBACK SYSTEM: Try 3-flash, fall back to 2.0-flash if needed
             let rawText = "";
             try {
-                // Trying Gemini 3 Flash Preview as requested
+                // Try Gemini 3 Flash Preview (As requested)
                 const data = await callGemini(effectiveKey, "gemini-3-flash-preview", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0 } 
@@ -343,7 +348,7 @@
                 rawText = data.candidates[0].content.parts[0].text;
             } catch (err) {
                 console.warn("Gemini 3.0 failed, falling back to 2.0", err);
-                // Fallback to Gemini 2.0 Flash Exp
+                // Fallback to Gemini 2.0 Flash Exp (Stable backup)
                 const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0 } 
@@ -688,6 +693,7 @@
                 setIsProcessing(false);
             };
 
+            // MODIFIED: Stop at Time Logic for Auto-Pause
             const handleTimeUpdate = (t) => {
                 setCurrentTime(t);
                 if (stopAtTime !== null && t >= stopAtTime) {
@@ -787,6 +793,7 @@
                 document.body.removeChild(textArea);
             };
 
+            // MODIFIED: Auto-Pause Logic
             const handleTranscriptSeek = (index) => {
                 if (!transcript || transcript.length === 0) return;
                 const seg = transcript[index];
@@ -794,6 +801,7 @@
                     setSeekTrigger(prev => prev + 1); 
                     setCurrentTime(seg.start); 
                     setIsPlaying(true); 
+                    setStopAtTime(seg.end); // <--- Auto-pause enabled
                 }
             };
 
@@ -996,7 +1004,7 @@
 
                     <div className="flex-1 flex overflow-hidden">
                         <aside className={`${sidebarOpen ? 'w-80 border-r' : 'w-0'} bg-white transition-all duration-300 overflow-hidden flex flex-col z-10 relative`}>
-                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[320px]"><h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><History className="w-4 h-4" /> Library</h2><button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronLeft className="w-4 h-4" /></button></div>
+                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[450px]"><h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><History className="w-4 h-4" /> Library</h2><button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronLeft className="w-4 h-4" /></button></div>
                             <div className="flex-1 overflow-y-auto p-3 space-y-2 min-w-[320px] custom-scrollbar">
                                 {history.length === 0 && <div className="text-center p-8 opacity-20"><Database className="w-8 h-8 mx-auto mb-2" /><p className="text-xs font-semibold">No files saved</p></div>}
                                 {history.map(item => (
