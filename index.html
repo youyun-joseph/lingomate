@@ -47,6 +47,7 @@
         import React, { useState, useEffect, useRef } from 'https://esm.sh/react@18.3.1';
         import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
         import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+        // ADDED Sparkles to imports
         import { 
             Play, Pause, ChevronRight, ChevronLeft, 
             Upload, FileText, History, Settings, 
@@ -87,10 +88,11 @@
             return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
         };
 
-        // --- SANITIZATION LOGIC ---
+        // --- STRICT CHAINING SANITIZER ---
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
             
+            // 1. Sort strictly
             const sorted = rawSegments.sort((a, b) => a.start - b.start);
             let nextStartPoint = 0.0;
 
@@ -99,24 +101,30 @@
                 let end = Number(seg.end);
 
                 // A. START TIME LOGIC
+                // First sentence MUST start at 0
                 if (index === 0) {
                     start = 0.0; 
                 } else {
+                    // All others start exactly where previous ended
                     start = nextStartPoint;
                 }
 
-                // B. END TIME LOGIC
+                // B. END TIME LOGIC (Strict Chaining)
+                // We add a tiny buffer (0.05s) to capture the tail of the current sentence.
+                // This 'end' will become the 'start' of the NEXT sentence.
                 end = end + 0.05;
 
                 // C. CHAINING
                 nextStartPoint = end;
 
                 // D. CLAMPING
-                if (totalDuration > 0 && end > totalDuration) {
+                // If it's the last segment or goes past total duration, clamp it.
+                if (totalDuration > 0 && (index === sorted.length - 1 || end > totalDuration)) {
                     end = totalDuration;
-                    nextStartPoint = totalDuration;
+                    nextStartPoint = totalDuration; // Ensure loop closes
                 }
                 
+                // Sanity check
                 if (end <= start) end = start + 0.5;
 
                 return { start, end, text: seg.text, speaker: seg.speaker || "Speaker" };
@@ -142,6 +150,7 @@
 
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
+                // PROMPT: From Success Example (App.jsx)
                 parts = [filePart, { text: `You are a professional transcriber tool. 
 I will provide an audio or video file. 
 Your task is to transcribe it into English and provide precise timestamps for the start and end of every sentence.
@@ -157,13 +166,15 @@ Output JSON:` }];
 
             let rawText = "";
             try {
+                // MODEL: gemini-2.5-flash-preview-09-2025 (Strictly following success example)
                 const data = await callGemini(effectiveKey, "gemini-2.5-flash-preview-09-2025", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
                 });
                 rawText = data.candidates[0].content.parts[0].text;
             } catch (err) {
-                console.warn("Gemini 2.5 failed, falling back to 2.0-flash-exp", err);
+                console.warn("Gemini 2.5 failed, attempting fallback", err);
+                // Fallback only if 2.5 fails unexpectedly
                 const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
