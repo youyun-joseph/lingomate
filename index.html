@@ -252,7 +252,7 @@
             return sentences;
         };
 
-        // --- UPDATED: CHAIN LINKING LOGIC ---
+        // --- UPDATED: CONTIGUOUS TIMESTAMP LOGIC ---
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
             
@@ -264,26 +264,21 @@
 
                 if (start < 0) start = 0;
                 
-                // --- CHAIN LINKING ---
+                // --- CONTIGUOUS SNAPPING ---
+                // If there is a next sentence...
                 if (index < sorted.length - 1) {
                     const nextStart = sorted[index + 1].start;
                     
-                    // IF there is a gap between this sentence and the next one...
-                    if (nextStart > end) {
-                        const gap = nextStart - end;
-                        // If gap is small (< 2.0s), assume it's part of the sentence flow (breath/pause)
-                        // and extend this sentence to meet the next one.
-                        if (gap < 2.0) {
-                            end = nextStart;
-                        }
-                    } 
-                    // IF there is an overlap (this sentence ends AFTER next starts)...
-                    else {
-                        // Snap back to avoid collision
-                        end = nextStart;
+                    // We simply set the END of this sentence to the START of the next sentence (minus 2ms).
+                    // This forces a "chain" with no gaps.
+                    // We only allow a "break" if the gap is massive (> 5 seconds), implying a scene change.
+                    if (nextStart - end < 5.0) {
+                        end = nextStart - 0.002;
                     }
+                    
+                    // (If nextStart < end, this logic also auto-corrects overlaps by snapping back)
                 } else {
-                    // Last sentence: extend to end of file (max 5s buffer)
+                    // Last sentence: extend slightly or to end of file
                     if (totalDuration && (totalDuration - end < 5.0)) {
                         end = totalDuration;
                     }
@@ -324,23 +319,19 @@
 
                 STRICT OUTPUT REQUIREMENTS:
                 1. Output strictly a list of words in this format: Word|Start|End
-                2. One word per line.
-                3. Do NOT use JSON. Do not use Markdown. Just raw text.
-                4. "Word" must include punctuation (e.g. Hello,|0.0|0.5).
-                5. Do NOT hallucinate.
+                2. Use MILLISECOND precision (e.g. 0.125).
+                3. One word per line.
+                4. Do NOT use JSON. Do not use Markdown. Just raw text.
+                5. "Word" must include punctuation (e.g. Hello,|0.000|0.500).
                 
                 Example Output:
-                Hello|0.00|0.50
-                world!|0.51|1.00
-                How|1.05|1.20
-                are|1.21|1.40
-                you?|1.41|1.90` }];
+                Hello|0.000|0.500
+                world!|0.510|1.000` }];
             }
 
-            // FALLBACK SYSTEM: Try 3-flash, fall back to 2.0-flash if needed
+            // Using Gemini 3 Flash Preview (with Fallback)
             let rawText = "";
             try {
-                // Try Gemini 3 Flash Preview (As requested)
                 const data = await callGemini(effectiveKey, "gemini-3-flash-preview", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0 } 
@@ -348,7 +339,6 @@
                 rawText = data.candidates[0].content.parts[0].text;
             } catch (err) {
                 console.warn("Gemini 3.0 failed, falling back to 2.0", err);
-                // Fallback to Gemini 2.0 Flash Exp (Stable backup)
                 const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0 } 
@@ -1004,7 +994,7 @@
 
                     <div className="flex-1 flex overflow-hidden">
                         <aside className={`${sidebarOpen ? 'w-80 border-r' : 'w-0'} bg-white transition-all duration-300 overflow-hidden flex flex-col z-10 relative`}>
-                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[450px]"><h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><History className="w-4 h-4" /> Library</h2><button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronLeft className="w-4 h-4" /></button></div>
+                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[320px]"><h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><History className="w-4 h-4" /> Library</h2><button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronLeft className="w-4 h-4" /></button></div>
                             <div className="flex-1 overflow-y-auto p-3 space-y-2 min-w-[320px] custom-scrollbar">
                                 {history.length === 0 && <div className="text-center p-8 opacity-20"><Database className="w-8 h-8 mx-auto mb-2" /><p className="text-xs font-semibold">No files saved</p></div>}
                                 {history.map(item => (
