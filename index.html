@@ -219,38 +219,49 @@
             return { inlineData: { data: base64, mimeType: file.type || 'application/octet-stream' } };
         };
 
-        // --- "THE ZIPPER" SANITIZER: Creates perfect chain links ---
+        // --- STRICT CHAINING & OFFSET LOGIC ---
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
             
-            // 1. Sort strictly by start time
+            // 1. Sort strictly
             const sorted = rawSegments.sort((a, b) => a.start - b.start);
 
             return sorted.map((seg, index) => {
-                // Ensure proper numbers
-                seg.start = Number(seg.start);
-                seg.end = Number(seg.end);
+                // Ensure number types
+                let start = Number(seg.start);
+                let end = Number(seg.end);
 
-                // A. FORCE START AT 0 (For the very first segment only)
-                if (index === 0) {
-                    seg.start = 0;
+                // FIX 1: REACTION TIME SHIFT
+                // Shift all start times back by 0.15s to account for AI detection delay
+                if (index > 0) {
+                    start = Math.max(0, start - 0.15);
+                } else {
+                    // First sentence always starts at 0
+                    start = 0;
                 }
-
-                // B. STRICT CHAINING (The Zipper)
-                // If there is a next segment, THIS segment ends exactly when the NEXT one starts.
+                
+                // FIX 2: STRICT ZIPPER CHAINING
+                // End time is ALWAYS the Start time of the next sentence.
+                // This eliminates the 0:02 -> 0:03 gap.
                 if (index < sorted.length - 1) {
-                    const nextSeg = sorted[index + 1];
-                    seg.end = nextSeg.start;
-                } 
-                // C. LAST SEGMENT CLAMP (The Audio Limit Fix)
-                else {
+                    // Calculate next segment's adjusted start time
+                    let nextSegStart = Number(sorted[index + 1].start);
+                    // Apply the same offset logic to next start before using it
+                    nextSegStart = Math.max(0, nextSegStart - 0.15);
+                    
+                    end = nextSegStart;
+                } else {
+                    // Last segment: strictly clamp to file duration
                     if (totalDuration > 0) {
-                        seg.end = totalDuration;
+                        end = totalDuration;
                     }
                 }
 
-                return seg;
-            }).filter(seg => seg.end > seg.start); 
+                // Sanity: Ensure positive duration
+                if (end <= start) end = start + 0.5;
+
+                return { start, end, text: seg.text, speaker: seg.speaker };
+            }).filter(Boolean);
         };
 
         const callGemini = async (apiKey, model, body) => {
@@ -265,7 +276,6 @@
             return data;
         };
 
-        // --- TRANSCRIPTION: Using Gemini 2.5 ---
         const processTranscription = async (apiKey, fileObject = null, contextText = "", totalDuration = 0) => {
             const effectiveKey = apiKey || DEFAULT_API_KEY;
             let parts = [];
@@ -273,7 +283,7 @@
 
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                // PROMPT: Sentence-Level for reliability
+                // PROMPT: Request standard JSON but trust our code for alignment
                 parts = [filePart, { text: `Act as a professional transcriber. Transcribe the audio into FULL, GRAMMATICAL SENTENCES.
                 
                 METADATA:
@@ -284,22 +294,21 @@
                 1. Transcribe the ENTIRE audio. Do not summarize.
                 2. Output a valid JSON Array of objects: [{ "text": "...", "start": 0.0, "end": 0.0, "speaker": "..." }]
                 3. Do not split sentences on abbreviations (Mr., Dr., etc.).
-                4. "start" is when the sentence begins.
                 
                 Output JSON:` }];
             }
 
             let rawText = "";
             try {
-                // MODEL CHANGED: Gemini 2.5 Flash
-                const data = await callGemini(effectiveKey, "gemini-2.5-flash", { 
+                // MODEL: gemini-2.0-flash-exp (Fastest/Best Audio Model)
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
                 });
                 rawText = data.candidates[0].content.parts[0].text;
             } catch (err) {
-                console.error("Transcription Failed:", err);
-                throw new Error("Failed to transcribe. Please check API Key and Model availability.");
+                console.error("Transcription Error", err);
+                throw new Error("Transcription failed. Please check API key.");
             }
             
             // Parsing Logic
@@ -326,8 +335,8 @@
                 contents: [{ parts: [{ text: `Analyze: "${sentence}". Provide translation and key grammar. ALL EXPLANATIONS MUST BE IN CHINESE SIMPLIFIED (简体中文). Output strictly JSON: { "meaning": "...", "grammar": "..." }.` }] }],
                 generationConfig: { responseMimeType: "application/json" }
             };
-            // MODEL CHANGED: Gemini 2.5 Flash
-            const data = await callGemini(effectiveKey, "gemini-2.5-flash", body);
+            
+            const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
             return JSON.parse(data.candidates[0].content.parts[0].text);
         };
 
@@ -344,8 +353,7 @@
                 generationConfig: { responseMimeType: "application/json" }
             };
 
-            // MODEL CHANGED: Gemini 2.5 Flash
-            const data = await callGemini(effectiveKey, "gemini-2.5-flash", body);
+            const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
             return JSON.parse(data.candidates[0].content.parts[0].text);
         };
 
@@ -408,7 +416,7 @@
             const [history, setHistory] = useState([]);
             const [vocabulary, setVocabulary] = useState([]);
             const [isProcessing, setIsProcessing] = useState(false);
-            const [processingError, setProcessingError] = useState(null); 
+            const [processingError, setProcessingError] = useState(null); // NEW: Error state
             const [contextPrompt, setContextPrompt] = useState("");
             const [geminiKey, setGeminiKey] = useState("");
             const [pendingFile, setPendingFile] = useState(null);
@@ -936,7 +944,7 @@
 
                     <div className="flex-1 flex overflow-hidden">
                         <aside className={`${sidebarOpen ? 'w-80 border-r' : 'w-0'} bg-white transition-all duration-300 overflow-hidden flex flex-col z-10 relative`}>
-                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[450px]"><h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><History className="w-4 h-4" /> Library</h2><button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronLeft className="w-4 h-4" /></button></div>
+                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[320px]"><h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><History className="w-4 h-4" /> Library</h2><button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronLeft className="w-4 h-4" /></button></div>
                             <div className="flex-1 overflow-y-auto p-3 space-y-2 min-w-[320px] custom-scrollbar">
                                 {history.length === 0 && <div className="text-center p-8 opacity-20"><Database className="w-8 h-8 mx-auto mb-2" /><p className="text-xs font-semibold">No files saved</p></div>}
                                 {history.map(item => (
