@@ -242,6 +242,7 @@
 
                 if (isEndOfSentence || isLastWord) {
                     const text = currentSentenceWords.join(' ');
+                    // We retain the last word's end time for now, but sanitizeTranscript will overwrite it for chaining.
                     const end = w.end; 
                     sentences.push({ text, start: currentStart, end, speaker: w.speaker || "Speaker" });
                     
@@ -252,7 +253,7 @@
             return sentences;
         };
 
-        // --- UPDATED: CONTIGUOUS TIMESTAMP LOGIC ---
+        // --- UPDATED: STRICT CHAINING SANITIZER ---
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
             
@@ -264,27 +265,25 @@
 
                 if (start < 0) start = 0;
                 
-                // --- CONTIGUOUS SNAPPING ---
-                // If there is a next sentence...
+                // 2. CHAIN LINKING LOGIC
+                // The end of the current sentence is STRICTLY the start of the next sentence.
+                // This eliminates ALL gaps between sentences.
                 if (index < sorted.length - 1) {
                     const nextStart = sorted[index + 1].start;
                     
-                    // We simply set the END of this sentence to the START of the next sentence (minus 2ms).
-                    // This forces a "chain" with no gaps.
-                    // We only allow a "break" if the gap is massive (> 5 seconds), implying a scene change.
+                    // We only allow a break if the silence is massive (> 5 seconds)
+                    // Otherwise, we snap them together.
                     if (nextStart - end < 5.0) {
-                        end = nextStart - 0.002;
+                        end = nextStart; 
                     }
-                    
-                    // (If nextStart < end, this logic also auto-corrects overlaps by snapping back)
                 } else {
-                    // Last sentence: extend slightly or to end of file
+                    // Last segment: Extend to end of file if it's close, otherwise keep word time
                     if (totalDuration && (totalDuration - end < 5.0)) {
                         end = totalDuration;
                     }
                 }
 
-                // Sanity check: Ensure positive duration
+                // Sanity check
                 if (end <= start) end = start + 0.5;
 
                 return { start, end, text, speaker };
@@ -310,7 +309,7 @@
 
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                // PROMPT UPDATE: Pipe-Delimited format + Continuous Request
+                // PROMPT UPDATE: Pipe-Delimited format + Word Level
                 parts = [filePart, { text: `Act as a precision alignment engine. Transcribe the audio into INDIVIDUAL WORDS with exact timestamps.
                 
                 METADATA:
@@ -329,17 +328,17 @@
                 world!|0.510|1.000` }];
             }
 
-            // Using Gemini 3 Flash Preview (with Fallback)
+            // Using Gemini 2.0 Flash Exp (Stable & Fast)
             let rawText = "";
             try {
-                const data = await callGemini(effectiveKey, "gemini-3-flash-preview", { 
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0 } 
                 });
                 rawText = data.candidates[0].content.parts[0].text;
             } catch (err) {
-                console.warn("Gemini 3.0 failed, falling back to 2.0", err);
-                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
+                console.warn("Gemini 2.0 failed, falling back to 1.5", err);
+                const data = await callGemini(effectiveKey, "gemini-1.5-flash", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0 } 
                 });
@@ -377,10 +376,10 @@
             };
             
             try {
-                const data = await callGemini(effectiveKey, "gemini-3-flash-preview", body);
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
                 return JSON.parse(data.candidates[0].content.parts[0].text);
             } catch (e) {
-                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+                const data = await callGemini(effectiveKey, "gemini-1.5-flash", body);
                 return JSON.parse(data.candidates[0].content.parts[0].text);
             }
         };
@@ -399,10 +398,10 @@
             };
 
             try {
-                const data = await callGemini(effectiveKey, "gemini-3-flash-preview", body);
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
                 return JSON.parse(data.candidates[0].content.parts[0].text);
             } catch (e) {
-                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+                const data = await callGemini(effectiveKey, "gemini-1.5-flash", body);
                 return JSON.parse(data.candidates[0].content.parts[0].text);
             }
         };
