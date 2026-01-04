@@ -32,12 +32,11 @@
         .dictation-input.correct { color: #059669; border-bottom-color: #059669; }
         .dictation-input.incorrect { color: #dc2626; border-bottom-color: #dc2626; }
         
-        /* Highlight the active sentence nicely */
         .active-sentence {
-            background-color: #f3f4f6; /* gray-100 */
+            background-color: #f3f4f6;
             border-left: 4px solid black;
             padding-left: 12px;
-            margin-left: -16px; /* Offset the padding */
+            margin-left: -16px;
         }
     </style>
 </head>
@@ -52,12 +51,12 @@
             Play, Pause, ChevronRight, ChevronLeft, 
             Upload, FileText, History, Settings, 
             Mic, Volume2, User, LogOut, Loader2, X, Database, Save, AlertCircle, 
-            CheckCircle2, AlertTriangle, Trash2, SkipBack, SkipForward, RefreshCw, BookOpen, Layers, Square, Circle, Eye, Book, Wand2, Check, ListChecks, Share2
+            CheckCircle2, AlertTriangle, Trash2, SkipBack, SkipForward, RefreshCw, 
+            BookOpen, Layers, Square, Circle, Eye, Book, Wand2, Check, ListChecks, Share2, Sparkles 
         } from 'https://esm.sh/lucide-react@0.344.0?deps=react@18.3.1';
 
         const SUPABASE_URL = 'https://tnwtvxmbjwbgiwruttju.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRud3R2eG1iandiZ2l3cnV0dGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU2NjYzNzgsImV4cCI6MjA4MTI0MjM3OH0.3AexQNzabxTLV2PbkusFwSZe7n1jsYDBJF7GB2SXhRk';
-        // Default key provided for demo purposes
         const DEFAULT_API_KEY = "AIzaSyArbJjcdPrq74ABOW0jzL_xOh-xY0-JFQ0"; 
 
         const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -88,15 +87,11 @@
             return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
         };
 
-        // --- SANITIZATION LOGIC: "GAP-TO-NEXT" + "SAFETY BUFFER" ---
+        // --- SANITIZATION LOGIC ---
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
             
-            // 1. Sort by start time
             const sorted = rawSegments.sort((a, b) => a.start - b.start);
-            
-            // This variable tracks where the NEXT sentence should nominally start
-            // We initialize it to 0.0 for the first sentence
             let nextStartPoint = 0.0;
 
             return sorted.map((seg, index) => {
@@ -105,26 +100,15 @@
 
                 // A. START TIME LOGIC
                 if (index === 0) {
-                    start = 0.0; // Force first sentence to 0
+                    start = 0.0; 
                 } else {
-                    // For subsequent sentences, start EXACTLY where previous one ended
                     start = nextStartPoint;
                 }
 
                 // B. END TIME LOGIC
-                // We add a tiny buffer (0.05s) to the AI's end time to ensure we capture the tail sound.
-                // This prevents "clipping" the current sentence.
                 end = end + 0.05;
 
                 // C. CHAINING
-                // If there's a gap (e.g. AI End=5.0, Next AI Start=8.0), we do NOT extend this sentence.
-                // We let this sentence end at 5.05.
-                // But we set `nextStartPoint` to 5.05. 
-                // This means the NEXT sentence will start at 5.05 and contain the silence.
-                
-                // However, we must ensure strict continuity.
-                // The current segment ends at `end`.
-                // The next segment MUST start at `end`.
                 nextStartPoint = end;
 
                 // D. CLAMPING
@@ -133,7 +117,6 @@
                     nextStartPoint = totalDuration;
                 }
                 
-                // Sanity check
                 if (end <= start) end = start + 0.5;
 
                 return { start, end, text: seg.text, speaker: seg.speaker || "Speaker" };
@@ -159,7 +142,6 @@
 
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                // PROMPT: From Success Example (App.jsx)
                 parts = [filePart, { text: `You are a professional transcriber tool. 
 I will provide an audio or video file. 
 Your task is to transcribe it into English and provide precise timestamps for the start and end of every sentence.
@@ -175,7 +157,6 @@ Output JSON:` }];
 
             let rawText = "";
             try {
-                // MODEL: gemini-2.5-flash-preview-09-2025 (As requested from success example)
                 const data = await callGemini(effectiveKey, "gemini-2.5-flash-preview-09-2025", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
@@ -183,7 +164,6 @@ Output JSON:` }];
                 rawText = data.candidates[0].content.parts[0].text;
             } catch (err) {
                 console.warn("Gemini 2.5 failed, falling back to 2.0-flash-exp", err);
-                // Fallback if user key doesn't have preview access
                 const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
@@ -193,11 +173,9 @@ Output JSON:` }];
             
             let rawJson = [];
             try {
-                // Clean markdown code blocks if present
                 const cleanText = rawText.replace(/```json|```/g, '').trim();
                 rawJson = JSON.parse(cleanText);
             } catch (e) {
-                // Regex fallback
                 const match = rawText.match(/\[.*\]/s);
                 if (match) {
                     try { rawJson = JSON.parse(match[0]); } catch (e2) {}
@@ -227,7 +205,6 @@ Output JSON:` }];
                 }
             }, [seekTime]);
 
-            // Handle StopAtTime Check
             const handleTimeUpdate = (e) => {
                 const t = e.target.currentTime;
                 onTimeUpdate(t);
@@ -259,8 +236,6 @@ Output JSON:` }];
             );
         };
 
-        // --- MAIN APPLICATION ---
-
         function App() {
             const [user, setUser] = useState(null);
             const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -277,12 +252,9 @@ Output JSON:` }];
             const [history, setHistory] = useState([]);
 
             const activeIndex = transcript.findIndex((s, idx) => {
-                // Simple logic: current time is within this segment
-                // OR current time is in the gap before next segment (for "gap-to-next" logic)
                 return currentTime >= s.start && currentTime < s.end;
             });
 
-            // Auto-scroll to active sentence
             const transcriptRef = useRef(null);
             useEffect(() => {
                 if (activeIndex !== -1 && transcriptRef.current) {
@@ -293,7 +265,6 @@ Output JSON:` }];
                 }
             }, [activeIndex]);
 
-            // Initialize
             useEffect(() => {
                 const init = async () => {
                     const { data: { user } } = await supabase.auth.getUser();
@@ -332,11 +303,10 @@ Output JSON:` }];
 
             const handleTranscriptClick = (seg) => {
                 setCurrentTime(seg.start);
-                setStopAtTime(seg.end); // Auto-pause at end
+                setStopAtTime(seg.end); 
                 setIsPlaying(true);
             };
 
-            // Modal Components (Simplified for brevity)
             const SettingsModal = ({ isOpen, onClose, apiKey, onSave }) => {
                 const [key, setKey] = useState(apiKey || '');
                 if (!isOpen) return null;
@@ -358,7 +328,6 @@ Output JSON:` }];
                 <div className="h-full flex flex-col font-sans text-gray-900 bg-gray-50 overflow-hidden">
                     <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} apiKey={geminiKey} onSave={setGeminiKey} />
                     
-                    {/* Header */}
                     <header className="bg-white px-6 py-4 flex justify-between items-center shadow-sm z-10">
                         <div className="flex items-center gap-2">
                             <div className="bg-black p-1.5 rounded"><Sparkles className="text-white w-4 h-4" /></div>
@@ -368,7 +337,6 @@ Output JSON:` }];
                     </header>
 
                     <div className="flex-1 flex overflow-hidden">
-                        {/* Main Content */}
                         <main className="flex-1 flex flex-col p-6 overflow-y-auto custom-scrollbar">
                             {!source ? (
                                 <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-3xl m-4 hover:bg-gray-50 transition-colors">
@@ -379,7 +347,6 @@ Output JSON:` }];
                                 </div>
                             ) : (
                                 <div className="max-w-3xl mx-auto w-full space-y-6">
-                                    {/* Player Section */}
                                     <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
                                         <div className="flex items-center justify-between mb-4">
                                             <h2 className="font-bold text-gray-800 truncate pr-4">{source.title}</h2>
@@ -403,7 +370,6 @@ Output JSON:` }];
                                         </div>
                                     </div>
 
-                                    {/* Transcript Generation */}
                                     {transcript.length === 0 && (
                                         <div className="text-center py-10">
                                             <button onClick={handleGenerate} disabled={isProcessing} className="px-8 py-4 bg-black text-white font-bold rounded-2xl shadow-xl hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2 mx-auto">
@@ -417,7 +383,6 @@ Output JSON:` }];
                             )}
                         </main>
 
-                        {/* Transcript Sidebar */}
                         {transcript.length > 0 && (
                             <aside className="w-[400px] bg-white border-l border-gray-200 flex flex-col shadow-xl z-20">
                                 <div className="p-4 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
