@@ -219,12 +219,15 @@
             return { inlineData: { data: base64, mimeType: file.type || 'application/octet-stream' } };
         };
 
-        // --- NEW: Assembly Engine to Stitch Words into Sentences ---
+        // --- UPDATED: Smarter Assembly Engine ---
         const assembleSentences = (wordSegments) => {
             if (!wordSegments) return [];
             const sentences = [];
             let currentSentenceWords = [];
             let currentStart = null;
+
+            // List of common abbreviations to ignore during splitting
+            const abbrs = new Set(['mr.', 'mrs.', 'ms.', 'dr.', 'st.', 'vs.', 'capt.', 'col.', 'gen.', 'lt.', 'maj.', 'sgt.', 'prof.', 'rev.']);
 
             wordSegments.forEach((w, index) => {
                 const wordClean = w.word.trim();
@@ -237,12 +240,13 @@
                 currentSentenceWords.push(wordClean);
 
                 // Check for sentence-ending punctuation
-                const isEndOfSentence = /[.!?。！？]$/.test(wordClean);
+                const isPunctuation = /[.!?。！？]$/.test(wordClean);
+                const isAbbreviation = abbrs.has(wordClean.toLowerCase());
                 const isLastWord = index === wordSegments.length - 1;
 
-                if (isEndOfSentence || isLastWord) {
+                // Split ONLY if punctuation AND NOT abbreviation (or if it's the very last word)
+                if ((isPunctuation && !isAbbreviation) || isLastWord) {
                     const text = currentSentenceWords.join(' ');
-                    // We retain the last word's end time for now, but sanitizeTranscript will overwrite it for chaining.
                     const end = w.end; 
                     sentences.push({ text, start: currentStart, end, speaker: w.speaker || "Speaker" });
                     
@@ -263,21 +267,25 @@
             return sorted.map((seg, index) => {
                 let { start, end, text, speaker } = seg;
 
-                if (start < 0) start = 0;
+                // FIX 1: FORCE START TO 0 FOR FIRST SEGMENT
+                if (index === 0) {
+                    start = 0;
+                } else if (start < 0) {
+                    start = 0;
+                }
                 
-                // 2. CHAIN LINKING LOGIC
-                // The end of the current sentence is STRICTLY the start of the next sentence.
-                // This eliminates ALL gaps between sentences.
+                // FIX 2: STRICT CHAINING
                 if (index < sorted.length - 1) {
                     const nextStart = sorted[index + 1].start;
                     
-                    // We only allow a break if the silence is massive (> 5 seconds)
-                    // Otherwise, we snap them together.
+                    // We FORCE the end of this sentence to be exactly the start of the next.
+                    // This creates the "Perfect Result" from your example where End[n] == Start[n+1].
+                    // We only allow a break if the gap is HUGE (> 5 seconds), implying a scene change.
                     if (nextStart - end < 5.0) {
                         end = nextStart; 
                     }
                 } else {
-                    // Last segment: Extend to end of file if it's close, otherwise keep word time
+                    // Last segment: Extend to end of file if it's close
                     if (totalDuration && (totalDuration - end < 5.0)) {
                         end = totalDuration;
                     }
@@ -309,7 +317,7 @@
 
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                // PROMPT UPDATE: Pipe-Delimited format + Word Level
+                // PROMPT UPDATE: Pipe-Delimited format + Continuous Request
                 parts = [filePart, { text: `Act as a precision alignment engine. Transcribe the audio into INDIVIDUAL WORDS with exact timestamps.
                 
                 METADATA:
@@ -328,17 +336,17 @@
                 world!|0.510|1.000` }];
             }
 
-            // Using Gemini 2.0 Flash Exp (Stable & Fast)
+            // Using Gemini 3 Flash Preview (with Fallback)
             let rawText = "";
             try {
-                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
+                const data = await callGemini(effectiveKey, "gemini-3-flash-preview", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0 } 
                 });
                 rawText = data.candidates[0].content.parts[0].text;
             } catch (err) {
-                console.warn("Gemini 2.0 failed, falling back to 1.5", err);
-                const data = await callGemini(effectiveKey, "gemini-1.5-flash", { 
+                console.warn("Gemini 3.0 failed, falling back to 2.0", err);
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0 } 
                 });
@@ -376,10 +384,10 @@
             };
             
             try {
-                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+                const data = await callGemini(effectiveKey, "gemini-3-flash-preview", body);
                 return JSON.parse(data.candidates[0].content.parts[0].text);
             } catch (e) {
-                const data = await callGemini(effectiveKey, "gemini-1.5-flash", body);
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
                 return JSON.parse(data.candidates[0].content.parts[0].text);
             }
         };
@@ -398,10 +406,10 @@
             };
 
             try {
-                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+                const data = await callGemini(effectiveKey, "gemini-3-flash-preview", body);
                 return JSON.parse(data.candidates[0].content.parts[0].text);
             } catch (e) {
-                const data = await callGemini(effectiveKey, "gemini-1.5-flash", body);
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
                 return JSON.parse(data.candidates[0].content.parts[0].text);
             }
         };
@@ -993,7 +1001,7 @@
 
                     <div className="flex-1 flex overflow-hidden">
                         <aside className={`${sidebarOpen ? 'w-80 border-r' : 'w-0'} bg-white transition-all duration-300 overflow-hidden flex flex-col z-10 relative`}>
-                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[320px]"><h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><History className="w-4 h-4" /> Library</h2><button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronLeft className="w-4 h-4" /></button></div>
+                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[450px]"><h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><History className="w-4 h-4" /> Library</h2><button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronLeft className="w-4 h-4" /></button></div>
                             <div className="flex-1 overflow-y-auto p-3 space-y-2 min-w-[320px] custom-scrollbar">
                                 {history.length === 0 && <div className="text-center p-8 opacity-20"><Database className="w-8 h-8 mx-auto mb-2" /><p className="text-xs font-semibold">No files saved</p></div>}
                                 {history.map(item => (
