@@ -219,79 +219,47 @@
             return { inlineData: { data: base64, mimeType: file.type || 'application/octet-stream' } };
         };
 
-        // --- UPDATED: Smarter Assembly Engine ---
-        const assembleSentences = (wordSegments) => {
-            if (!wordSegments) return [];
-            const sentences = [];
-            let currentSentenceWords = [];
-            let currentStart = null;
-
-            // List of common abbreviations to ignore during splitting
-            const abbrs = new Set(['mr.', 'mrs.', 'ms.', 'dr.', 'st.', 'vs.', 'capt.', 'col.', 'gen.', 'lt.', 'maj.', 'sgt.', 'prof.', 'rev.']);
-
-            wordSegments.forEach((w, index) => {
-                const wordClean = w.word.trim();
-                if (!wordClean) return;
-
-                if (currentSentenceWords.length === 0) {
-                    currentStart = w.start;
-                }
-                
-                currentSentenceWords.push(wordClean);
-
-                // Check for sentence-ending punctuation
-                const isPunctuation = /[.!?。！？]$/.test(wordClean);
-                const isAbbreviation = abbrs.has(wordClean.toLowerCase());
-                const isLastWord = index === wordSegments.length - 1;
-
-                // Split ONLY if punctuation AND NOT abbreviation (or if it's the very last word)
-                if ((isPunctuation && !isAbbreviation) || isLastWord) {
-                    const text = currentSentenceWords.join(' ');
-                    const end = w.end; 
-                    sentences.push({ text, start: currentStart, end, speaker: w.speaker || "Speaker" });
-                    
-                    currentSentenceWords = [];
-                    currentStart = null;
-                }
-            });
-            return sentences;
-        };
-
-        // --- UPDATED: STRICT CHAINING SANITIZER ---
+        // --- STRICT CHAINING SANITIZER ---
+        // This function ensures the transcript flows perfectly by connecting segments.
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
             
-            // 1. Sort strictly
+            // 1. Sort strictly by start time
             const sorted = rawSegments.sort((a, b) => a.start - b.start);
 
             return sorted.map((seg, index) => {
                 let { start, end, text, speaker } = seg;
 
-                // FIX 1: FORCE START TO 0 FOR FIRST SEGMENT
+                // A. Force start at 0 if it's the very first segment
                 if (index === 0) {
                     start = 0;
                 } else if (start < 0) {
                     start = 0;
                 }
                 
-                // FIX 2: STRICT CHAINING
+                // B. CHAIN LINKING: The Magic Fix
+                // Instead of trusting the AI's "end time", we set the end time
+                // to be exactly the start time of the NEXT sentence.
+                // This eliminates gaps where "words are spoken but not highlighted".
                 if (index < sorted.length - 1) {
                     const nextStart = sorted[index + 1].start;
                     
-                    // We FORCE the end of this sentence to be exactly the start of the next.
-                    // This creates the "Perfect Result" from your example where End[n] == Start[n+1].
-                    // We only allow a break if the gap is HUGE (> 5 seconds), implying a scene change.
+                    // Allow a break ONLY if the gap is massive (> 5 seconds)
                     if (nextStart - end < 5.0) {
                         end = nextStart; 
                     }
+                    // If the AI made them overlap, cut this one short
+                    else if (end > nextStart) {
+                         end = nextStart;
+                    }
                 } else {
-                    // Last segment: Extend to end of file if it's close
-                    if (totalDuration && (totalDuration - end < 5.0)) {
+                    // Last segment: Extend to the end of the file
+                    if (totalDuration) {
                         end = totalDuration;
                     }
                 }
 
-                // Sanity check
+                // Sanity check for minimum duration
                 if (end <= start) end = start + 0.5;
 
                 return { start, end, text, speaker };
@@ -310,6 +278,7 @@
             return data;
         };
 
+        // --- UPDATED TRANSCRIPTION PROCESS ---
         const processTranscription = async (apiKey, fileObject = null, contextText = "", totalDuration = 0) => {
             const effectiveKey = apiKey || DEFAULT_API_KEY;
             let parts = [];
@@ -317,63 +286,57 @@
 
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                // PROMPT UPDATE: Pipe-Delimited format + Continuous Request
-                parts = [filePart, { text: `Act as a precision alignment engine. Transcribe the audio into INDIVIDUAL WORDS with exact timestamps.
+                // PROMPT: Reverted to Sentence-Level to save tokens and ensure completion.
+                // We trust the AI for 'start' times, and use our code to fix 'end' times.
+                parts = [filePart, { text: `Act as a professional transcriber. Transcribe the audio into FULL, GRAMMATICAL SENTENCES.
                 
                 METADATA:
                 - Context: ${contextText}
                 - Total Duration: ${durationStr}s
 
-                STRICT OUTPUT REQUIREMENTS:
-                1. Output strictly a list of words in this format: Word|Start|End
-                2. Use MILLISECOND precision (e.g. 0.125).
-                3. One word per line.
-                4. Do NOT use JSON. Do not use Markdown. Just raw text.
-                5. "Word" must include punctuation (e.g. Hello,|0.000|0.500).
+                STRICT REQUIREMENTS:
+                1. Transcribe the ENTIRE audio. Do not summarize.
+                2. Output a valid JSON Array of objects: [{ "text": "...", "start": 0.0, "end": 0.0, "speaker": "..." }]
+                3. Do not split sentences on abbreviations (Mr., Dr., etc.).
+                4. "start" is when the sentence begins. "end" is when it ends.
                 
-                Example Output:
-                Hello|0.000|0.500
-                world!|0.510|1.000` }];
+                Output JSON:` }];
             }
 
-            // Using Gemini 3 Flash Preview (with Fallback)
             let rawText = "";
             try {
-                const data = await callGemini(effectiveKey, "gemini-3-flash-preview", { 
+                // Use Gemini 2.0 Flash Exp (High Capacity, Fast)
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
                     contents: [{ parts: parts }], 
-                    generationConfig: { temperature: 0.0 } 
+                    generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
                 });
                 rawText = data.candidates[0].content.parts[0].text;
             } catch (err) {
-                console.warn("Gemini 3.0 failed, falling back to 2.0", err);
-                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
+                console.warn("Gemini 2.0 failed, falling back to 1.5", err);
+                const data = await callGemini(effectiveKey, "gemini-1.5-flash", { 
                     contents: [{ parts: parts }], 
-                    generationConfig: { temperature: 0.0 } 
+                    generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
                 });
                 rawText = data.candidates[0].content.parts[0].text;
             }
             
-            // ROBUST PARSING
-            const lines = rawText.split('\n');
-            const wordSegments = [];
-            
-            for (const line of lines) {
-                const parts = line.trim().split('|');
-                if (parts.length >= 3) {
-                    const word = parts[0].trim();
-                    const start = parseFloat(parts[1]);
-                    const end = parseFloat(parts[2]);
-                    
-                    if (word && !isNaN(start) && !isNaN(end)) {
-                        wordSegments.push({ word, start, end });
-                    }
+            // Parsing Logic
+            let rawJson = [];
+            try {
+                rawJson = JSON.parse(rawText);
+            } catch (e) {
+                // Fallback regex if JSON is messy
+                const match = rawText.match(/\[.*\]/s);
+                if (match) {
+                    try { rawJson = JSON.parse(match[0]); } catch (e2) {}
                 }
             }
 
-            if (wordSegments.length === 0) throw new Error("Failed to parse transcript format. Please check API key.");
+            if (!Array.isArray(rawJson) || rawJson.length === 0) {
+                 throw new Error("Failed to parse transcript. Please try again.");
+            }
 
-            const assembledSentences = assembleSentences(wordSegments);
-            return sanitizeTranscript(assembledSentences, totalDuration);
+            return sanitizeTranscript(rawJson, totalDuration);
         };
 
         const fetchMeaningAndGrammar = async (apiKey, sentence) => {
@@ -384,10 +347,10 @@
             };
             
             try {
-                const data = await callGemini(effectiveKey, "gemini-3-flash-preview", body);
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
                 return JSON.parse(data.candidates[0].content.parts[0].text);
             } catch (e) {
-                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+                const data = await callGemini(effectiveKey, "gemini-1.5-flash", body);
                 return JSON.parse(data.candidates[0].content.parts[0].text);
             }
         };
@@ -406,10 +369,10 @@
             };
 
             try {
-                const data = await callGemini(effectiveKey, "gemini-3-flash-preview", body);
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
                 return JSON.parse(data.candidates[0].content.parts[0].text);
             } catch (e) {
-                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+                const data = await callGemini(effectiveKey, "gemini-1.5-flash", body);
                 return JSON.parse(data.candidates[0].content.parts[0].text);
             }
         };
