@@ -219,8 +219,7 @@
             return { inlineData: { data: base64, mimeType: file.type || 'application/octet-stream' } };
         };
 
-        // --- STRICT CHAINING SANITIZER ---
-        // This function ensures the transcript flows perfectly by connecting segments.
+        // --- THE ZIPPER SANITIZER (Strict Contiguity) ---
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
             
@@ -228,42 +227,32 @@
             const sorted = rawSegments.sort((a, b) => a.start - b.start);
 
             return sorted.map((seg, index) => {
-                let { start, end, text, speaker } = seg;
+                // Ensure proper numbers
+                seg.start = Number(seg.start);
+                seg.end = Number(seg.end);
 
-                // A. Force start at 0 if it's the very first segment
+                // A. FORCE START AT 0 (For the very first segment only)
                 if (index === 0) {
-                    start = 0;
-                } else if (start < 0) {
-                    start = 0;
+                    seg.start = 0;
                 }
-                
-                // B. CHAIN LINKING: The Magic Fix
-                // Instead of trusting the AI's "end time", we set the end time
-                // to be exactly the start time of the NEXT sentence.
-                // This eliminates gaps where "words are spoken but not highlighted".
+
+                // B. STRICT CHAINING (The Zipper)
+                // If there is a next segment, THIS segment ends exactly when the NEXT one starts.
                 if (index < sorted.length - 1) {
-                    const nextStart = sorted[index + 1].start;
-                    
-                    // Allow a break ONLY if the gap is massive (> 5 seconds)
-                    if (nextStart - end < 5.0) {
-                        end = nextStart; 
-                    }
-                    // If the AI made them overlap, cut this one short
-                    else if (end > nextStart) {
-                         end = nextStart;
-                    }
-                } else {
-                    // Last segment: Extend to the end of the file
-                    if (totalDuration) {
-                        end = totalDuration;
+                    const nextSeg = sorted[index + 1];
+                    seg.end = nextSeg.start;
+                } 
+                // C. LAST SEGMENT CLAMP (The Audio Limit Fix)
+                else {
+                    // Force the last segment to end exactly at the total duration of the file.
+                    // This solves the "Timestamp exceeds audio time" error.
+                    if (totalDuration > 0) {
+                        seg.end = totalDuration;
                     }
                 }
 
-                // Sanity check for minimum duration
-                if (end <= start) end = start + 0.5;
-
-                return { start, end, text, speaker };
-            }).filter(Boolean);
+                return seg;
+            }).filter(seg => seg.end > seg.start); // Filter out any zero-length accidents
         };
 
         const callGemini = async (apiKey, model, body) => {
@@ -278,7 +267,6 @@
             return data;
         };
 
-        // --- UPDATED TRANSCRIPTION PROCESS ---
         const processTranscription = async (apiKey, fileObject = null, contextText = "", totalDuration = 0) => {
             const effectiveKey = apiKey || DEFAULT_API_KEY;
             let parts = [];
@@ -286,8 +274,7 @@
 
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                // PROMPT: Reverted to Sentence-Level to save tokens and ensure completion.
-                // We trust the AI for 'start' times, and use our code to fix 'end' times.
+                // PROMPT: Sentence-Level with precision request
                 parts = [filePart, { text: `Act as a professional transcriber. Transcribe the audio into FULL, GRAMMATICAL SENTENCES.
                 
                 METADATA:
@@ -298,7 +285,7 @@
                 1. Transcribe the ENTIRE audio. Do not summarize.
                 2. Output a valid JSON Array of objects: [{ "text": "...", "start": 0.0, "end": 0.0, "speaker": "..." }]
                 3. Do not split sentences on abbreviations (Mr., Dr., etc.).
-                4. "start" is when the sentence begins. "end" is when it ends.
+                4. "start" is when the sentence begins.
                 
                 Output JSON:` }];
             }
@@ -325,7 +312,6 @@
             try {
                 rawJson = JSON.parse(rawText);
             } catch (e) {
-                // Fallback regex if JSON is messy
                 const match = rawText.match(/\[.*\]/s);
                 if (match) {
                     try { rawJson = JSON.parse(match[0]); } catch (e2) {}
