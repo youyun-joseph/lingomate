@@ -47,7 +47,7 @@
         import React, { useState, useEffect, useRef } from 'https://esm.sh/react@18.3.1';
         import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
         import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-        // ADDED Sparkles to imports
+        // ADDED Sparkles to imports to fix ReferenceError
         import { 
             Play, Pause, ChevronRight, ChevronLeft, 
             Upload, FileText, History, Settings, 
@@ -88,44 +88,45 @@
             return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
         };
 
-        // --- STRICT CHAINING SANITIZER ---
+        // --- SANITIZATION: STRICT CHAINING ---
+        // Logic: Start[N] = End[N-1]
+        // This ensures gaps are swallowed by the *next* sentence.
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
             
-            // 1. Sort strictly
+            // 1. Sort strictly by start time
             const sorted = rawSegments.sort((a, b) => a.start - b.start);
-            let nextStartPoint = 0.0;
+            
+            // Track end of previous sentence
+            let previousEnd = 0.0;
 
             return sorted.map((seg, index) => {
-                let start = Number(seg.start);
-                let end = Number(seg.end);
+                let start, end;
 
-                // A. START TIME LOGIC
-                // First sentence MUST start at 0
+                // Rule 1: First sentence starts at 0
                 if (index === 0) {
                     start = 0.0; 
                 } else {
-                    // All others start exactly where previous ended
-                    start = nextStartPoint;
+                    // Rule 2: Subsequent sentences start EXACTLY where previous ended
+                    // This pulls any silence/gap into the BEGINNING of this sentence
+                    start = previousEnd;
                 }
 
-                // B. END TIME LOGIC (Strict Chaining)
-                // We add a tiny buffer (0.05s) to capture the tail of the current sentence.
-                // This 'end' will become the 'start' of the NEXT sentence.
-                end = end + 0.05;
+                // Rule 3: End time comes from AI, plus a tiny buffer to avoid clipping the last word
+                end = Number(seg.end) + 0.05;
 
-                // C. CHAINING
-                nextStartPoint = end;
+                // Safety: If AI returned an end time BEFORE our forced start, push it forward
+                if (end <= start) {
+                    end = start + 1.0; // Minimal duration fallback
+                }
 
-                // D. CLAMPING
-                // If it's the last segment or goes past total duration, clamp it.
-                if (totalDuration > 0 && (index === sorted.length - 1 || end > totalDuration)) {
+                // Rule 4: Clamp to total file duration
+                if (totalDuration > 0 && end > totalDuration) {
                     end = totalDuration;
-                    nextStartPoint = totalDuration; // Ensure loop closes
                 }
-                
-                // Sanity check
-                if (end <= start) end = start + 0.5;
+
+                // Update tracker for next iteration
+                previousEnd = end;
 
                 return { start, end, text: seg.text, speaker: seg.speaker || "Speaker" };
             });
@@ -173,8 +174,7 @@ Output JSON:` }];
                 });
                 rawText = data.candidates[0].content.parts[0].text;
             } catch (err) {
-                console.warn("Gemini 2.5 failed, attempting fallback", err);
-                // Fallback only if 2.5 fails unexpectedly
+                console.warn("Gemini 2.5 failed, attempting fallback to 2.0", err);
                 const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
@@ -198,6 +198,35 @@ Output JSON:` }];
             }
 
             return sanitizeTranscript(rawJson, totalDuration);
+        };
+
+        const fetchMeaningAndGrammar = async (apiKey, sentence) => {
+            const effectiveKey = apiKey || DEFAULT_API_KEY;
+            const body = {
+                contents: [{ parts: [{ text: `Analyze: "${sentence}". Provide translation and key grammar. ALL EXPLANATIONS MUST BE IN CHINESE SIMPLIFIED (简体中文). Output strictly JSON: { "meaning": "...", "grammar": "..." }.` }] }],
+                generationConfig: { responseMimeType: "application/json" }
+            };
+            
+            // Using 2.0-flash-exp for auxiliary tasks as it is robust for text
+            const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+            return JSON.parse(data.candidates[0].content.parts[0].text);
+        };
+
+        const fetchBatchReAnalysis = async (apiKey, fileObject, startTime, endTime, hint) => {
+             const effectiveKey = apiKey || DEFAULT_API_KEY;
+             const filePart = await fileToGenerativePart(fileObject);
+             const body = {
+                contents: [{ 
+                    parts: [
+                        filePart, 
+                        { text: `Re-analyze accurately the audio between ${startTime.toFixed(2)}s and ${endTime.toFixed(2)}s. Correction hint: "${hint || 'None'}". Output strictly JSON as an array of logical segments: Array<{ text: string, start: number, end: number, speaker: string }>.` }
+                    ] 
+                }],
+                generationConfig: { responseMimeType: "application/json" }
+            };
+
+            const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+            return JSON.parse(data.candidates[0].content.parts[0].text);
         };
 
         const SmartPlayer = ({ source, isPlaying, setIsPlaying, seekTime, onTimeUpdate, stopAtTime, setStopAtTime }) => {
