@@ -211,3 +211,21 @@ Can we try this approach: The start time starts with the first letter of a sente
 
 
 Features including UI, user auth were not retained. Please only aligned the Transcript Generation strictly with the logic from your success example (App.jsx). Other parts (such as UI, user auth, etc) should stay with the previous html version as attached.
+
+It looks great!
+
+I tested three sample audios and spot a problem: Gemini make a mistake for the timestamp around 0:57 - 1:47. This time span can cover multiple sentences but Gemini marked this timestamp on one sentence.
+
+Can we improve the prompt so that Gemini could avoid this mistake?
+
+Please make this update based on the attached html file.
+Based on your feedback and the screenshots (which show single segments spanning ~50 seconds), the issue is that the AI model is getting "lazy" and grouping multiple sentences into a single block instead of splitting them.
+To fix this, we need to harden the prompt to strictly forbid "Paragraph-Level" timestamps and enforce "Sentence-Level" granularity.
+
+The Fix: Prompt Engineering
+I have updated the processTranscription function with a much stricter prompt:
+
+"One Sentence Per Object" Rule: Explicitly forbids merging sentences.
+"Split on Punctuation" Rule: Forces a split at every ., ?, or !.
+"No Lazy Grouping": Tells the AI that long segments (>15s) are considered errors.
+I also kept the Gemini 2.5 model and the Zipper/Chain logic (Start = Prev End) because those are working well for the alignment itself.
