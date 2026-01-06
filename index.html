@@ -107,9 +107,10 @@
                 if (index === 0) {
                     start = 0.0;
                 } else {
-                    start = previousEnd;
+                    start = previousEnd; // Zipper logic
                 }
                 
+                // Minimal safety buffer to prevent 0-length segments
                 if (end < start + 0.2) {
                     end = start + 0.2; 
                 }
@@ -144,6 +145,7 @@
             
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
+                // PROMPT: STRICT LINGUISTIC SPLITTING (NO MATH)
                 parts = [filePart, { text: `You are a precision audio alignment engine.
 I will provide an audio file.
 Your task: Transcribe it into **INDIVIDUAL SENTENCES**.
@@ -163,6 +165,7 @@ Output JSON only:` }];
 
             let rawText = "";
             try {
+                // MODEL: gemini-2.5-flash-preview-09-2025
                 const data = await callGemini(effectiveKey, "gemini-2.5-flash-preview-09-2025", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
@@ -864,23 +867,9 @@ Output JSON only:` }];
                             return (
                                 <div key={wordIdx} className="flex items-end gap-1">
                                     <div className="flex gap-1">
-                                        {[...Array(cleanWord.length)].map((_, charIdx) => {
-                                            const currentKey = `${wordIdx}_${charIdx}`;
-                                            const nextKey = (charIdx < cleanWord.length - 1) ? `${wordIdx}_${charIdx + 1}` : (wordIdx < tokens.length - 1) ? `${wordIdx + 1}_0` : null;
-                                            const prevKey = (charIdx > 0) ? `${wordIdx}_${charIdx - 1}` : (wordIdx > 0) ? `${wordIdx - 1}_${tokens[wordIdx-1].replace(/[.,!?;:"]/g, '').length - 1}` : null;
-                                            const isCorrect = dictationValues[currentKey]?.toLowerCase() === cleanWord[charIdx].toLowerCase();
-                                            const isIncorrect = dictationChecked && dictationValues[currentKey] && dictationValues[currentKey]?.toLowerCase() !== cleanWord[charIdx].toLowerCase();
-                                            return (
-                                                <input key={charIdx} id={`input-${currentKey}`} type="text" autoComplete="off" className={`dictation-input ${isCorrect ? 'correct' : ''} ${isIncorrect ? 'incorrect' : ''}`} value={dictationValues[currentKey] || ''} onChange={(e) => {
-                                                    const val = e.target.value.slice(-1);
-                                                    setDictationValues(p => ({ ...p, [currentKey]: val }));
-                                                    if (val && nextKey) document.getElementById(`input-${nextKey}`)?.focus();
-                                                }} onKeyDown={(e) => {
-                                                    if (e.key === 'Backspace' && !dictationValues[currentKey] && prevKey) document.getElementById(`input-${prevKey}`)?.focus();
-                                                    if (e.key === ' ') { e.preventDefault(); document.getElementById(`input-${wordIdx + 1}_0`)?.focus(); }
-                                                }} />
-                                            );
-                                        })}
+                                        {[...Array(cleanWord.length)].map((_, charIdx) => (
+                                            <input key={charIdx} type="text" className="dictation-input" />
+                                        ))}
                                     </div>
                                     {punctuation && <span className="text-gray-400 text-xl font-bold pb-1">{punctuation}</span>}
                                 </div>
@@ -930,28 +919,37 @@ Output JSON only:` }];
                         </aside>
 
                         <main className="flex-1 flex flex-col min-w-0 bg-gray-50 overflow-hidden relative">
-                            {/* ... Player and Controls ... */}
-                            {!source ? (
-                                <div className="mt-16 bg-white p-12 border border-gray-100 shadow-sm rounded-3xl text-center group m-auto">
-                                    <div className="w-16 h-16 bg-gray-50 mx-auto mb-6 flex items-center justify-center group-hover:bg-black rounded-2xl"><Upload className="w-8 h-8" /></div>
-                                    <h3 className="font-bold text-2xl mb-2 text-gray-900">Analyze media</h3>
-                                    <label className="block w-full bg-black text-white py-4 font-bold rounded-2xl cursor-pointer hover:bg-gray-800 shadow-lg">Select file<input type="file" className="hidden" accept="video/*,audio/*" onChange={handleFileUpload} /></label>
-                                </div>
-                            ) : transcript.length === 0 ? (
-                                <div className="mt-16 bg-white p-10 flex flex-col items-center text-center rounded-3xl shadow-sm border border-gray-100 m-auto">
-                                    <div className="w-12 h-12 bg-gray-50 flex items-center justify-center rounded-xl mb-4 text-gray-400"><FileText className="w-6 h-6" /></div>
-                                    <h3 className="font-bold text-lg text-gray-900 mb-2">Generate transcript</h3>
-                                    <div className="w-full space-y-4">
-                                        <input placeholder="Context (e.g. French Lesson)" className="w-full px-5 py-3.5 bg-gray-50 border-none rounded-2xl text-sm outline-none focus:ring-2 focus:ring-black transition-all" value={contextPrompt} onChange={e => setContextPrompt(e.target.value)} />
-                                        <button onClick={handleGenerate} disabled={isProcessing} className="w-full bg-black text-white py-4 font-bold rounded-2xl flex items-center justify-center gap-3 hover:bg-gray-800 disabled:opacity-50 transition-all shadow-md">
-                                            {isProcessing ? <Spinner /> : "Generate transcript"}
-                                        </button>
-                                        {processingError && <div className="p-4 bg-red-50 text-red-600 text-xs font-bold rounded-xl border border-red-100 text-center animate-pulse">Error: {processingError}</div>}
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="flex-1 flex flex-col overflow-y-auto relative custom-scrollbar">
-                                    <div className="px-8 pb-12 pt-16 max-w-3xl mx-auto w-full">
+                            {!sidebarOpen && <div className="absolute top-4 left-4 z-20"><button onClick={() => setSidebarOpen(true)} className="p-3 bg-white border border-gray-200 rounded-full text-gray-600 shadow-lg hover:bg-gray-50 flex items-center gap-2 px-5 font-bold text-xs uppercase tracking-widest"><History className="w-4 h-4" /> Library <ChevronRight className="w-4 h-4" /></button></div>}
+                            
+                            {!transcriptOpen && transcript.length > 0 && <div className="absolute top-4 right-4 z-20"><button onClick={() => setTranscriptOpen(true)} className="p-3 bg-white border border-gray-200 rounded-full text-gray-600 shadow-lg hover:bg-gray-50 flex items-center gap-2 px-5 font-bold text-xs uppercase tracking-widest"><ChevronLeft className="w-4 h-4" /> Transcript <FileText className="w-4 h-4" /></button></div>}
+
+                            <div className="flex-1 flex flex-col overflow-y-auto relative custom-scrollbar">
+                                <div className="px-8 pb-12 pt-16 max-w-3xl mx-auto w-full">
+                                    {!source ? (
+                                        <div className="mt-16 bg-white p-12 border border-gray-100 shadow-sm rounded-3xl text-center group">
+                                            <div className="w-16 h-16 bg-gray-50 mx-auto mb-6 flex items-center justify-center group-hover:bg-black rounded-2xl"><Upload className="w-8 h-8" /></div>
+                                            <h3 className="font-bold text-2xl mb-2 text-gray-900">Analyze media</h3>
+                                            <p className="text-gray-500 text-sm mb-8 font-normal">Upload an audio or video file to start practice.</p>
+                                            <label className="block w-full bg-black text-white py-4 font-bold rounded-2xl cursor-pointer hover:bg-gray-800 shadow-lg">Select file<input type="file" className="hidden" accept="video/*,audio/*" onChange={handleFileUpload} /></label>
+                                        </div>
+                                    ) : transcript.length === 0 ? (
+                                        <div className="mt-16 bg-white p-10 flex flex-col items-center text-center rounded-3xl shadow-sm border border-gray-100">
+                                            <div className="w-12 h-12 bg-gray-50 flex items-center justify-center rounded-xl mb-4 text-gray-400"><FileText className="w-6 h-6" /></div>
+                                            <h3 className="font-bold text-lg text-gray-900 mb-2">Generate transcript</h3>
+                                            <p className="text-sm text-gray-500 mb-8 max-w-xs leading-relaxed">Generate a sentence-by-sentence transcript to start practicing.</p>
+                                            <div className="w-full space-y-4">
+                                                <input placeholder="Context (e.g. French Lesson)" className="w-full px-5 py-3.5 bg-gray-50 border-none rounded-2xl text-sm outline-none focus:ring-2 focus:ring-black transition-all" value={contextPrompt} onChange={e => setContextPrompt(e.target.value)} />
+                                                <button onClick={handleGenerate} disabled={isProcessing} className="w-full bg-black text-white py-4 font-bold rounded-2xl flex items-center justify-center gap-3 hover:bg-gray-800 disabled:opacity-50 transition-all shadow-md">
+                                                    {isProcessing ? <Spinner /> : "Generate transcript"}
+                                                </button>
+                                                {processingError && (
+                                                    <div className="p-4 bg-red-50 text-red-600 text-xs font-bold rounded-xl border border-red-100 text-center animate-pulse">
+                                                        Error: {processingError}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ) : (
                                         <div className="space-y-4 fade-in">
                                             <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={currentTime} onTimeUpdate={handleTimeUpdate} stopAtTime={stopAtTime} setStopAtTime={setStopAtTime} seekTrigger={seekTrigger} loopRange={loopRange} />
                                             
@@ -994,13 +992,14 @@ Output JSON only:` }];
                                                     )}
                                                     {activeTab === 'Dictation' && (
                                                         <div className="h-full flex flex-col space-y-6 fade-in">
+                                                            <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptSeek(activeIndex - 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptSeek(activeIndex + 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
                                                             <div className="p-10 bg-gray-50 rounded-[2.5rem] border border-gray-100 min-h-[300px] flex flex-col items-center justify-center overflow-y-auto custom-scrollbar gap-8">{showDictationContent && <div className="w-full text-center px-6 py-4 bg-white/50 rounded-2xl border border-gray-200 fade-in"><p className="text-lg font-semibold text-gray-900 leading-relaxed">{transcript[activeIndex]?.text}</p></div>}{renderDictationSlots()}</div>
                                                             <div className="flex flex-wrap justify-center items-center gap-4 px-2"><button onClick={() => { setDictationChecked(true); }} className="px-8 py-3 bg-black text-white text-sm font-bold rounded-2xl shadow-md">Check spelling</button><button onClick={() => setShowDictationContent(!showDictationContent)} className="px-8 py-3 bg-white border border-gray-200 text-gray-700 text-sm font-bold rounded-2xl hover:bg-gray-50 transition-all flex items-center gap-2"><Eye size={16} /> {showDictationContent ? "Hide content" : "Show content"}</button>{showDictationContent && <button onClick={triggerAnalysis} disabled={isAnalyzing} className="px-8 py-3 bg-blue-600 text-white text-sm font-bold rounded-2xl shadow-md hover:bg-blue-700 transition-all flex items-center gap-2">{isAnalyzing ? <Spinner /> : <Book size={16} />} Analyze</button>}</div>
                                                         </div>
                                                     )}
                                                     {activeTab === 'Translation' && (
                                                         <div className="h-full flex flex-col space-y-6 fade-in">
-                                                            <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptSeek(Math.max(0, activeIndex - 1))} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptSeek(Math.min(transcript.length - 1, activeIndex + 1))} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
+                                                            <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptSeek(activeIndex - 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptSeek(activeIndex + 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
                                                             <div className="flex-1 flex flex-col gap-4">
                                                                 <label className="text-xs font-bold text-gray-400 uppercase px-1 tracking-widest">Source sentence</label>
                                                                 <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100"><p className="text-lg font-semibold text-gray-900 leading-relaxed italic">{transcript[activeIndex]?.text || "Select a segment to practice"}</p></div>
@@ -1039,7 +1038,6 @@ Output JSON only:` }];
                             </div>
                             <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-[450px] custom-scrollbar pb-24 bg-gray-50/30" ref={transcriptRef}>
                                 {transcript.map((s, idx) => {
-                                    const isSelected = selectedIndices.includes(idx);
                                     const isActive = activeIndex === idx;
                                     return (
                                         <div key={idx} onClick={(e) => handleTranscriptClick(s)} className={`group p-4 rounded-xl cursor-pointer transition-all border-2 flex gap-3 relative ${isActive ? 'bg-black border-black text-white shadow-md' : 'bg-white border-transparent hover:border-gray-100 text-gray-500 shadow-sm'}`}>
