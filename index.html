@@ -32,6 +32,18 @@
         .dictation-input.correct { color: #059669; border-bottom-color: #059669; }
         .dictation-input.incorrect { color: #dc2626; border-bottom-color: #dc2626; }
 
+        .floating-add-btn {
+            position: fixed;
+            z-index: 1000;
+            transform: translate(-50%, -100%);
+            margin-top: -12px;
+            animation: popIn 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        @keyframes popIn {
+            from { opacity: 0; transform: translate(-50%, -100%) scale(0.8); }
+            to { opacity: 1; transform: translate(-50%, -100%) scale(1); }
+        }
+
         .share-toast {
             position: fixed;
             bottom: 24px;
@@ -53,9 +65,10 @@
         import { 
             Play, Pause, ChevronRight, ChevronLeft, 
             Upload, FileText, History, Settings, 
-            Mic, Volume2, User, LogOut, Loader2, X, Database, Save, AlertCircle, 
-            CheckCircle2, AlertTriangle, Trash2, SkipBack, SkipForward, RefreshCw, 
-            BookOpen, Layers, Square, Circle, Eye, Book, Wand2, Check, ListChecks, Share2, Sparkles, School, GraduationCap, Edit2, Clock
+            Repeat, Mic, Volume2, User, LogOut, Loader2, X, Database, Save, AlertCircle, 
+            CheckCircle2, ArrowRight, Music, KeyRound, AlertTriangle, Trash2, SkipBack, 
+            SkipForward, RefreshCw, PenTool, BookOpen, Layers, Square, Circle, Eye, 
+            Book, Languages, Plus, Wand2, Check, ListChecks, Share2, Sparkles, Pencil, Clock, MoveRight
         } from 'https://esm.sh/lucide-react@0.344.0?deps=react@18.3.1';
 
         const SUPABASE_URL = 'https://tnwtvxmbjwbgiwruttju.supabase.co';
@@ -64,202 +77,7 @@
 
         const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // --- UTILS & HELPERS ---
-        const Spinner = () => <Loader2 className="w-4 h-4 animate-spin" />;
-        const sanitizeFilename = (filename) => filename.replace(/[^a-z0-9.]/gi, '_').replace(/_+/g, '_');
-
-        const getMediaDuration = (file) => new Promise((resolve) => {
-            const url = URL.createObjectURL(file);
-            const media = file.type.startsWith('video/') ? document.createElement('video') : document.createElement('audio');
-            media.src = url;
-            media.onloadedmetadata = () => { resolve(media.duration); };
-            media.onerror = () => resolve(0);
-        });
-
-        const fileToGenerativePart = async (file) => {
-            const base64 = await new Promise(r => {
-                const reader = new FileReader();
-                reader.onloadend = () => r(reader.result.split(',')[1]);
-                reader.readAsDataURL(file);
-            });
-            return { inlineData: { data: base64, mimeType: file.type || 'application/octet-stream' } };
-        };
-
-        const formatTime = (s) => {
-            if (s === undefined || s === null) return "0:00.000";
-            const mins = Math.floor(s / 60);
-            const secs = Math.floor(s % 60);
-            const ms = Math.floor((s % 1) * 1000);
-            return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
-        };
-
-        // --- TRANSCRIPTION LOGIC ---
-        const sanitizeTranscript = (rawSegments, totalDuration) => {
-            if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
-            
-            const sorted = rawSegments.sort((a, b) => a.start - b.start);
-            let previousEnd = 0.0;
-
-            return sorted.map((seg, index) => {
-                let start = Number(seg.start);
-                let end = Number(seg.end);
-
-                if (index === 0) {
-                    start = 0.0;
-                } else {
-                    start = previousEnd;
-                }
-                
-                if (end < start + 0.2) {
-                    end = start + 0.2; 
-                }
-
-                previousEnd = end;
-
-                if (totalDuration > 0 && index === sorted.length - 1 && end > totalDuration) {
-                    end = totalDuration;
-                }
-
-                if (end <= start) end = start + 0.5;
-
-                return { start, end, text: seg.text, speaker: seg.speaker || "Speaker" };
-            }).filter(Boolean);
-        };
-
-        const callGemini = async (apiKey, model, body) => {
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-            const data = await response.json();
-            if (data.error) throw new Error(data.error.message);
-            if (!data.candidates) throw new Error("No response from AI");
-            return data;
-        };
-
-        const processTranscription = async (apiKey, fileObject = null, contextText = "", totalDuration = 0) => {
-            const effectiveKey = apiKey || DEFAULT_API_KEY;
-            let parts = [];
-            
-            if (fileObject) {
-                const filePart = await fileToGenerativePart(fileObject);
-                parts = [filePart, { text: `You are a precision audio alignment engine.
-I will provide an audio file.
-Your task: Transcribe it into **INDIVIDUAL SENTENCES**.
-
-CRITICAL INSTRUCTIONS:
-1. **ONE SENTENCE PER TIMESTAMP**: You must create a new timestamp segment for every single grammatical sentence. Do not combine multiple sentences into a single block.
-2. **STRICT SPLITTING**: Split segments strictly at every period (.), question mark (?), or exclamation point (!).
-3. **TIMING**: 
-   - "start": exact start of the first word.
-   - "end": exact end of the last word.
-   - Ensure timestamps cover the spoken audio sequentially.
-4. **FORMAT**: Return strictly a JSON Array: 
-   [ { "text": "string", "start": number, "end": number } ]
-
-Output JSON only:` }];
-            }
-
-            let rawText = "";
-            try {
-                const data = await callGemini(effectiveKey, "gemini-2.5-flash-preview-09-2025", { 
-                    contents: [{ parts: parts }], 
-                    generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
-                });
-                rawText = data.candidates[0].content.parts[0].text;
-            } catch (err) {
-                console.warn("Gemini 2.5 failed, attempting fallback to 2.0", err);
-                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
-                    contents: [{ parts: parts }], 
-                    generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
-                });
-                rawText = data.candidates[0].content.parts[0].text;
-            }
-            
-            let rawJson = [];
-            try {
-                const cleanText = rawText.replace(/```json|```/g, '').trim();
-                rawJson = JSON.parse(cleanText);
-            } catch (e) {
-                const match = rawText.match(/\[.*\]/s);
-                if (match) {
-                    try { rawJson = JSON.parse(match[0]); } catch (e2) {}
-                }
-            }
-
-            if (!Array.isArray(rawJson) || rawJson.length === 0) {
-                 throw new Error("Failed to parse transcript. Please try again.");
-            }
-
-            return sanitizeTranscript(rawJson, totalDuration);
-        };
-
-        const fetchMeaningAndGrammar = async (apiKey, sentence) => {
-            const effectiveKey = apiKey || DEFAULT_API_KEY;
-            const body = {
-                contents: [{ parts: [{ text: `Analyze: "${sentence}". Provide translation and key grammar. ALL EXPLANATIONS MUST BE IN CHINESE SIMPLIFIED (简体中文). Output strictly JSON: { "meaning": "...", "grammar": "..." }.` }] }],
-                generationConfig: { responseMimeType: "application/json" }
-            };
-            const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
-            return JSON.parse(data.candidates[0].content.parts[0].text);
-        };
-
-        const fetchBatchReAnalysis = async (apiKey, fileObject, startTime, endTime, hint) => {
-             const effectiveKey = apiKey || DEFAULT_API_KEY;
-             const filePart = await fileToGenerativePart(fileObject);
-             const body = {
-                contents: [{ 
-                    parts: [
-                        filePart, 
-                        { text: `Re-analyze accurately the audio between ${startTime.toFixed(2)}s and ${endTime.toFixed(2)}s. Correction hint: "${hint || 'None'}". Output strictly JSON as an array of logical segments: Array<{ text: string, start: number, end: number, speaker: string }>.` }
-                    ] 
-                }],
-                generationConfig: { responseMimeType: "application/json" }
-            };
-            const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
-            return JSON.parse(data.candidates[0].content.parts[0].text);
-        };
-
-        const SmartPlayer = ({ source, isPlaying, setIsPlaying, seekTime, onTimeUpdate, stopAtTime, setStopAtTime, seekTrigger, loopRange }) => {
-            const mediaRef = useRef(null);
-
-            useEffect(() => {
-                if (mediaRef.current) {
-                    if (isPlaying) mediaRef.current.play().catch(e => console.error("Play error:", e));
-                    else mediaRef.current.pause();
-                }
-            }, [isPlaying]);
-
-            useEffect(() => {
-                if (mediaRef.current && seekTime !== undefined && Math.abs(mediaRef.current.currentTime - seekTime) > 0.05) {
-                    mediaRef.current.currentTime = seekTime;
-                }
-            }, [seekTrigger]);
-
-            if (source.mediaType === 'video') {
-                return (
-                    <div className="w-full aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl relative border-4 border-white mb-4">
-                        <video 
-                            ref={mediaRef} 
-                            src={source.url} 
-                            className="w-full h-full object-contain"
-                            onTimeUpdate={(e) => onTimeUpdate(e.target.currentTime)}
-                        />
-                    </div>
-                );
-            }
-
-            return (
-                <audio 
-                    ref={mediaRef} 
-                    src={source.url} 
-                    onTimeUpdate={(e) => onTimeUpdate(e.target.currentTime)}
-                />
-            );
-        };
-
-        // --- COMPONENTS ---
+        // --- MODAL COMPONENTS ---
         const ModalLayout = ({ children, isOpen, onClose, title, icon: Icon }) => {
             if (!isOpen) return null;
             return (
@@ -309,7 +127,7 @@ Output JSON only:` }];
                             <input type="password" required className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-black transition-all" value={password} onChange={e => setPassword(e.target.value)} />
                         </div>
                         <button type="submit" disabled={loading} className="w-full bg-black text-white py-4 font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-gray-800 transition-all shadow-md">
-                            {loading ? <Spinner /> : mode === 'login' ? "Login" : "Register"}
+                            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : mode === 'login' ? "Login" : "Register"}
                         </button>
                         <p className="text-center text-sm text-gray-500 pt-2">
                             {mode === 'login' ? "Don't have an account?" : "Already have an account?"}
@@ -381,88 +199,199 @@ Output JSON only:` }];
             );
         };
 
-        const EditTimestampPanel = ({ isOpen, onClose, segment, onSave }) => {
-            const [endTime, setEndTime] = useState(0);
-            const [showRippleConfirm, setShowRippleConfirm] = useState(false);
+        // --- UTILS & HELPERS ---
+        const Spinner = () => <Loader2 className="w-4 h-4 animate-spin" />;
+
+        const sanitizeFilename = (filename) => filename.replace(/[^a-z0-9.]/gi, '_').replace(/_+/g, '_');
+
+        const getMediaDuration = (file) => new Promise((resolve) => {
+            const url = URL.createObjectURL(file);
+            const media = file.type.startsWith('video/') ? document.createElement('video') : document.createElement('audio');
+            media.src = url;
+            media.onloadedmetadata = () => { URL.revokeObjectURL(url); resolve(media.duration); };
+            media.onerror = () => resolve(0);
+        });
+
+        const fileToGenerativePart = async (file) => {
+            const base64 = await new Promise(r => {
+                const reader = new FileReader();
+                reader.onloadend = () => r(reader.result.split(',')[1]);
+                reader.readAsDataURL(file);
+            });
+            return { inlineData: { data: base64, mimeType: file.type || 'application/octet-stream' } };
+        };
+
+        const sanitizeTranscript = (rawSegments, totalDuration) => {
+            if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
+            
+            const sorted = rawSegments.sort((a, b) => a.start - b.start);
+            let previousEnd = 0.0;
+
+            return sorted.map((seg, index) => {
+                let start = Number(seg.start);
+                let end = Number(seg.end);
+
+                if (index === 0) {
+                    start = 0.0;
+                } else {
+                    start = previousEnd;
+                }
+                
+                // Keep AI end time but ensure it doesn't overlap backwards
+                if (end <= start) end = start + 0.5;
+
+                previousEnd = end;
+
+                if (totalDuration > 0 && end > totalDuration) {
+                    end = totalDuration;
+                    previousEnd = totalDuration;
+                }
+
+                return { start, end, text: seg.text, speaker: seg.speaker || "Speaker" };
+            }).filter(Boolean);
+        };
+
+        const callGemini = async (apiKey, model, body) => {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await response.json();
+            if (data.error) throw new Error(data.error.message);
+            if (!data.candidates) throw new Error("No response from AI");
+            return data;
+        };
+
+        const processTranscription = async (apiKey, fileObject = null, contextText = "", totalDuration = 0) => {
+            const effectiveKey = apiKey || DEFAULT_API_KEY;
+            let parts = [];
+            
+            if (fileObject) {
+                const filePart = await fileToGenerativePart(fileObject);
+                parts = [filePart, { text: `You are a professional transcriber tool. 
+I will provide an audio or video file. 
+Your task is to transcribe it into English and provide precise timestamps for the start and end of every sentence.
+
+STRICT REQUIREMENTS:
+1. Output strictly a VALID JSON array of objects.
+2. Format: [ { "text": "string", "start": number, "end": number } ]
+3. Do not split sentences on abbreviations (e.g. Mr., Dr.).
+4. Transcription must be verbatim.
+                
+Output JSON:` }];
+            }
+
+            let rawText = "";
+            try {
+                const data = await callGemini(effectiveKey, "gemini-2.5-flash-preview-09-2025", { 
+                    contents: [{ parts: parts }], 
+                    generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
+                });
+                rawText = data.candidates[0].content.parts[0].text;
+            } catch (err) {
+                console.warn("Gemini 2.5 failed, attempting fallback to 2.0", err);
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
+                    contents: [{ parts: parts }], 
+                    generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
+                });
+                rawText = data.candidates[0].content.parts[0].text;
+            }
+            
+            let rawJson = [];
+            try {
+                const cleanText = rawText.replace(/```json|```/g, '').trim();
+                rawJson = JSON.parse(cleanText);
+            } catch (e) {
+                const match = rawText.match(/\[.*\]/s);
+                if (match) {
+                    try { rawJson = JSON.parse(match[0]); } catch (e2) {}
+                }
+            }
+
+            if (!Array.isArray(rawJson) || rawJson.length === 0) {
+                 throw new Error("Failed to parse transcript. Please try again.");
+            }
+
+            return sanitizeTranscript(rawJson, totalDuration);
+        };
+
+        const fetchMeaningAndGrammar = async (apiKey, sentence) => {
+            const effectiveKey = apiKey || DEFAULT_API_KEY;
+            const body = {
+                contents: [{ parts: [{ text: `Analyze: "${sentence}". Provide translation and key grammar. ALL EXPLANATIONS MUST BE IN CHINESE SIMPLIFIED (简体中文). Output strictly JSON: { "meaning": "...", "grammar": "..." }.` }] }],
+                generationConfig: { responseMimeType: "application/json" }
+            };
+            const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+            return JSON.parse(data.candidates[0].content.parts[0].text);
+        };
+
+        const fetchBatchReAnalysis = async (apiKey, fileObject, startTime, endTime, hint) => {
+             const effectiveKey = apiKey || DEFAULT_API_KEY;
+             const filePart = await fileToGenerativePart(fileObject);
+             const body = {
+                contents: [{ 
+                    parts: [
+                        filePart, 
+                        { text: `Re-analyze accurately the audio between ${startTime.toFixed(2)}s and ${endTime.toFixed(2)}s. Correction hint: "${hint || 'None'}". Output strictly JSON as an array of logical segments: Array<{ text: string, start: number, end: number, speaker: string }>.` }
+                    ] 
+                }],
+                generationConfig: { responseMimeType: "application/json" }
+            };
+
+            const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+            return JSON.parse(data.candidates[0].content.parts[0].text);
+        };
+
+        const SmartPlayer = ({ source, isPlaying, setIsPlaying, seekTime, onTimeUpdate, loopRange, seekTrigger }) => {
+            const mediaRef = useRef(null);
 
             useEffect(() => {
-                if (segment) setEndTime(segment.end);
-            }, [segment]);
-
-            const handleSave = () => {
-                if (Math.abs(endTime - segment.end) > 0.001) {
-                    setShowRippleConfirm(true);
-                } else {
-                    onClose();
+                if (mediaRef.current) {
+                    if (isPlaying) mediaRef.current.play().catch(() => setIsPlaying(false));
+                    else mediaRef.current.pause();
                 }
-            };
+            }, [isPlaying]);
 
-            const confirmSave = (applyRipple) => {
-                onSave(segment.id || 0, Number(endTime), applyRipple);
-                setShowRippleConfirm(false);
-                onClose();
-            };
+            useEffect(() => {
+                if (mediaRef.current && seekTime !== undefined) {
+                    mediaRef.current.currentTime = seekTime;
+                }
+            }, [seekTrigger]);
+
+            if (source.mediaType === 'video') {
+                return (
+                    <div className="w-full aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl relative border-4 border-white mb-4">
+                        <video 
+                            ref={mediaRef} 
+                            src={source.url} 
+                            className="w-full h-full object-contain"
+                            onTimeUpdate={(e) => onTimeUpdate(e.target.currentTime)}
+                        />
+                    </div>
+                );
+            }
 
             return (
-                <div className={`fixed inset-y-0 left-0 z-50 w-80 bg-white border-r shadow-2xl transition-transform duration-300 ease-in-out transform ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-                    <div className="h-full flex flex-col">
-                        <div className="p-4 border-b bg-indigo-50 flex justify-between items-center">
-                            <div className="flex items-center gap-2 font-bold text-indigo-900"><Clock size={18} /> Edit Time</div>
-                            <button onClick={onClose} className="p-1 hover:bg-indigo-100 rounded-full text-indigo-400"><X size={20} /></button>
-                        </div>
-                        
-                        <div className="flex-1 p-6 space-y-6">
-                            {!showRippleConfirm ? (
-                                <>
-                                    <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">
-                                        <p className="text-xs font-bold text-gray-400 uppercase mb-2">Sentence</p>
-                                        <p className="text-sm font-medium leading-relaxed">{segment?.text}</p>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Start</label>
-                                            <div className="w-full px-4 py-3 bg-gray-100 rounded-xl text-sm font-mono text-gray-500">{formatTime(segment?.start)}</div>
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">End</label>
-                                            <input 
-                                                type="number" 
-                                                step="0.001" 
-                                                className="w-full px-4 py-3 bg-white border border-indigo-200 rounded-xl text-sm font-mono outline-none focus:ring-2 focus:ring-indigo-500" 
-                                                value={endTime}
-                                                onChange={(e) => setEndTime(e.target.value)}
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <button onClick={handleSave} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-gray-800 transition-all shadow-md">
-                                        Update Timestamp
-                                    </button>
-                                </>
-                            ) : (
-                                <div className="space-y-4 animate-in fade-in slide-in-from-right-4">
-                                    <div className="p-4 bg-yellow-50 border border-yellow-100 rounded-xl">
-                                        <h4 className="font-bold text-yellow-800 mb-2 flex items-center gap-2"><AlertTriangle size={16}/> Auto-Adjust?</h4>
-                                        <p className="text-xs text-yellow-700 leading-relaxed">
-                                            You changed the end time. Do you want to shift all following sentences by the same amount to keep them synced?
-                                        </p>
-                                    </div>
-                                    <button onClick={() => confirmSave(true)} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl text-xs hover:bg-indigo-700">
-                                        Yes, Shift All (Ripple)
-                                    </button>
-                                    <button onClick={() => confirmSave(false)} className="w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl text-xs hover:bg-gray-200">
-                                        No, Just This Segment
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
+                <audio 
+                    ref={mediaRef} 
+                    src={source.url} 
+                    onTimeUpdate={(e) => onTimeUpdate(e.target.currentTime)}
+                />
             );
         };
 
+        // --- UPDATED TIME FORMATTER (MILLISECONDS) ---
+        const formatTime = (s) => {
+            if (s === undefined || s === null) return "0:00.000";
+            const mins = Math.floor(s / 60);
+            const secs = Math.floor(s % 60);
+            const ms = Math.floor((s % 1) * 1000);
+            return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+        };
+
         // --- MAIN APPLICATION ---
+
         function App() {
             const [user, setUser] = useState(null);
             const [isLoginOpen, setIsLoginOpen] = useState(false);
@@ -472,16 +401,15 @@ Output JSON only:` }];
             const [sidebarOpen, setSidebarOpen] = useState(true); 
             const [transcriptOpen, setTranscriptOpen] = useState(true);
             const [fixPanelOpen, setFixPanelOpen] = useState(false);
-            const [editPanelOpen, setEditPanelOpen] = useState(false);
-            const [editingSegment, setEditingSegment] = useState(null);
+            const [fixPanelMode, setFixPanelMode] = useState('ai'); // 'ai' or 'manual'
 
             const [source, setSource] = useState(null);
             const [transcript, setTranscript] = useState([]);
             const [isPlaying, setIsPlaying] = useState(false);
             const [currentTime, setCurrentTime] = useState(0);
-            const [stopAtTime, setStopAtTime] = useState(null);
             const [seekTrigger, setSeekTrigger] = useState(0);
             const [loopRange, setLoopRange] = useState(null);
+            const [stopAtTime, setStopAtTime] = useState(null);
             const [history, setHistory] = useState([]);
             const [vocabulary, setVocabulary] = useState([]);
             const [isProcessing, setIsProcessing] = useState(false);
@@ -492,57 +420,79 @@ Output JSON only:` }];
             const [activeTab, setActiveTab] = useState('Shadowing');
             const [chunkSize, setChunkSize] = useState('single'); 
 
-            // Features
             const [dictationValues, setDictationValues] = useState({});
             const [dictationChecked, setDictationChecked] = useState(false);
             const [showDictationContent, setShowDictationContent] = useState(false);
             const [analysis, setAnalysis] = useState(null);
             const [isAnalyzing, setIsAnalyzing] = useState(false);
+
             const [translationAttempt, setTranslationAttempt] = useState("");
             const [showTranslationAnswer, setShowTranslationAnswer] = useState(false);
-            
-            // Recording
+
             const [isRecording, setIsRecording] = useState(false);
             const [recorder, setRecorder] = useState(null);
             const [recordedBlob, setRecordedBlob] = useState(null);
             const [recordingsList, setRecordingsList] = useState([]);
             const [isSavingRecord, setIsSavingRecord] = useState(false);
 
-            // Re-analysis
+            // Re-analysis State (AI)
             const [correctionHint, setCorrectionHint] = useState("");
             const [isReAnalyzing, setIsReAnalyzing] = useState(false);
             const [reAnalysisError, setReAnalysisError] = useState(null);
             const [selectedIndices, setSelectedIndices] = useState([]);
             const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
             const [reAnalysisPreview, setReAnalysisPreview] = useState(null);
+
+            // Manual Edit State
+            const [editingIndex, setEditingIndex] = useState(null);
+            const [manualEndTime, setManualEndTime] = useState(0);
+            const [shiftFollowing, setShiftFollowing] = useState(false);
+
             const [shareToastVisible, setShareToastVisible] = useState(false);
+            const [selectionState, setSelectionState] = useState({ visible: false, x: 0, y: 0, text: '' });
 
             const activeIndex = transcript.findIndex((s, idx) => {
-                return currentTime >= s.start && currentTime < s.end;
+                const nextStart = transcript[idx + 1]?.start || Infinity;
+                return currentTime >= s.start && currentTime < nextStart;
             });
 
-            // Auto-scroll
-            const transcriptRef = useRef(null);
-            useEffect(() => {
-                if (activeIndex !== -1 && transcriptRef.current) {
-                    const activeEl = transcriptRef.current.children[activeIndex];
-                    if (activeEl) {
-                        activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                }
-            }, [activeIndex]);
+            const autoCollapseTranscript = () => { if (transcriptOpen) setTranscriptOpen(false); };
 
-            // Init Data
+            useEffect(() => {
+                if (!source) { 
+                    setSidebarOpen(true); 
+                    setTranscriptOpen(false);
+                } else { 
+                    setSidebarOpen(false); 
+                    setTranscriptOpen(true);
+                }
+            }, [source]);
+
+            useEffect(() => {
+                setDictationValues({}); setDictationChecked(false); setShowDictationContent(false); setAnalysis(null);
+                setCorrectionHint("");
+                setTranslationAttempt("");
+                setShowTranslationAnswer(false);
+            }, [transcript, seekTrigger]);
+
             useEffect(() => {
                 const init = async () => {
-                    const { data: userData } = await supabase.auth.getUser();
-                    if (userData.user) {
-                        setUser(userData.user);
-                        fetchSettings(userData.user.id);
-                        fetchRecordings(userData.user.id);
-                        fetchVocabulary(userData.user.id);
-                        fetchHistory();
-                    }
+                    try {
+                        const { data: userData } = await supabase.auth.getUser();
+                        if (userData.user) {
+                            setUser(userData.user);
+                            fetchSettings(userData.user.id);
+                            fetchRecordings(userData.user.id);
+                            fetchVocabulary(userData.user.id);
+                            fetchHistory();
+                        }
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const shareId = urlParams.get('share');
+                        if (shareId) {
+                            const { data: sharedData, error: sharedError } = await supabase.from('transcripts').select('*').eq('id', shareId).single();
+                            if (sharedData && !sharedError) loadSession(sharedData);
+                        }
+                    } catch (err) { console.error(err); }
                 };
                 init();
                 const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -555,36 +505,65 @@ Output JSON only:` }];
                         fetchHistory();
                     }
                 });
-                return () => { if (subscription) subscription.unsubscribe(); };
+                const handleMouseUp = () => {
+                    const sel = window.getSelection();
+                    if (!sel || sel.rangeCount === 0) return;
+                    const text = sel.toString().trim();
+                    if (text && text.length > 0 && text.length < 50) {
+                        const range = sel.getRangeAt(0);
+                        const rect = range.getBoundingClientRect();
+                        setSelectionState({ visible: true, x: rect.left + (rect.width / 2), y: rect.top + window.scrollY, text: text });
+                    } else {
+                        setSelectionState(prev => ({ ...prev, visible: false }));
+                    }
+                };
+                document.addEventListener('mouseup', handleMouseUp);
+                return () => { 
+                    if (subscription) subscription.unsubscribe(); 
+                    document.removeEventListener('mouseup', handleMouseUp);
+                };
             }, []);
 
             const fetchSettings = async (uid) => {
                 const { data } = await supabase.from('user_settings').select('gemini_api_key').eq('user_id', uid).single();
                 if (data?.gemini_api_key) setGeminiKey(data.gemini_api_key);
             };
+
             const saveSettings = async (nk) => {
                 setGeminiKey(nk);
                 if (user) await supabase.from('user_settings').upsert({ user_id: user.id, gemini_api_key: nk });
             };
+
             const fetchHistory = async () => {
                 const { data } = await supabase.from('transcripts').select('*').order('created_at', { ascending: false });
                 if (data) setHistory(data);
             };
+
             const fetchRecordings = async (uid) => {
                 const { data } = await supabase.from('user_recordings').select('*').eq('user_id', uid).order('created_at', { ascending: false });
                 if (data) setRecordingsList(data);
             };
+
             const fetchVocabulary = async (uid) => {
                 const { data } = await supabase.from('user_vocabulary').select('*').eq('user_id', uid).order('created_at', { ascending: false });
                 if (data) setVocabulary(data);
             };
-            const handleAuth = async (email, password, mode) => {
-                const { error } = (mode === 'signup') 
-                    ? await supabase.auth.signUp({ email, password }) 
-                    : await supabase.auth.signInWithPassword({ email, password });
-                if (error) return error.message;
-                setIsLoginOpen(false);
-                return null;
+
+            const saveSelectionToVocab = async () => {
+                if (!user) { setIsLoginOpen(true); return; }
+                const { error } = await supabase.from('user_vocabulary').insert([{ user_id: user.id, word: selectionState.text, definition: "Added from selection", example: "" }]);
+                if (!error) { fetchVocabulary(user.id); setSelectionState(prev => ({ ...prev, visible: false })); }
+            };
+
+            const saveVocabWord = async () => {
+                if (!analysis || !user) return;
+                const { error } = await supabase.from('user_vocabulary').insert([{ user_id: user.id, word: analysis.content, definition: analysis.meaning, example: "" }]);
+                if (!error) { fetchVocabulary(user.id); }
+            };
+
+            const deleteVocabWord = async (id) => {
+                const { error } = await supabase.from('user_vocabulary').delete().eq('id', id);
+                if (!error) fetchVocabulary(user.id);
             };
 
             const handleFileUpload = async (e) => {
@@ -608,15 +587,15 @@ Output JSON only:` }];
                 setProcessingError(null);
                 try {
                     const result = await processTranscription(geminiKey, source.fileData, contextPrompt || source.title, source.duration || 0);
-                    // Add IDs
-                    const transcriptWithIds = result.map((seg, i) => ({ ...seg, id: i }));
-                    setTranscript(transcriptWithIds);
+                    setTranscript(result);
                     if (user) {
                         const sanitizedTitle = sanitizeFilename(source.title);
                         const filePath = `${user.id}/${Date.now()}_${sanitizedTitle}`;
                         await supabase.storage.from('media').upload(filePath, source.fileData, { cacheControl: '3600', upsert: true });
                         const { data: urlData } = supabase.storage.from('media').getPublicUrl(filePath);
-                        await supabase.from('transcripts').upsert({ user_id: user.id, title: source.title, source_type: source.mediaType, source_url: urlData.publicUrl, content: transcriptWithIds }, { onConflict: 'user_id, title' });
+                        await supabase.from('transcripts').upsert({ user_id: user.id, title: source.title, source_type: source.mediaType, source_url: urlData.publicUrl, content: result }, { onConflict: 'user_id, title' }).select().single().then(({data}) => {
+                            if(data) setSource(prev => ({...prev, id: data.id}));
+                        });
                         fetchHistory();
                     }
                 } catch (err) { 
@@ -637,75 +616,41 @@ Output JSON only:` }];
                 }
             };
 
-            const handleTranscriptClick = (seg) => {
-                if(!seg) return;
-                setCurrentTime(seg.start);
-                setStopAtTime(seg.end); 
-                setIsPlaying(true);
-            };
-
-            const openEditPanel = (e, seg) => {
-                e.stopPropagation();
-                setEditingSegment(seg);
-                setEditPanelOpen(true);
-            };
-
-            const handleUpdateTimestamp = async (segId, newEnd, ripple) => {
-                const newTranscript = [...transcript];
-                const segIndex = newTranscript.findIndex(s => s.id === segId);
-                if (segIndex === -1) return;
-
-                const oldEnd = newTranscript[segIndex].end;
-                const diff = newEnd - oldEnd;
-
-                // 1. Update current segment
-                newTranscript[segIndex].end = newEnd;
-
-                // 2. Ripple Logic
-                if (ripple) {
-                    for (let i = segIndex + 1; i < newTranscript.length; i++) {
-                        newTranscript[i].start += diff;
-                        newTranscript[i].end += diff;
-                    }
-                } else {
-                    // Just boundary move (Zipper)
-                    if (segIndex + 1 < newTranscript.length) {
-                        newTranscript[segIndex + 1].start = newEnd;
-                        // Ensure no negative duration
-                        if (newTranscript[segIndex + 1].end < newEnd) {
-                             newTranscript[segIndex + 1].end = newEnd + 0.5;
-                        }
-                    }
-                }
-
-                setTranscript(newTranscript);
-                
-                // Update DB
-                if (user && source.id) {
-                    await supabase.from('transcripts').update({ content: newTranscript }).eq('id', source.id);
-                }
-            };
-
             const handleReAnalyze = async () => {
                 if (!source) return;
+                setReAnalysisError(null);
                 let fileBlob = source.fileData;
                 if (!fileBlob && source.url) {
                     try {
-                        const res = await fetch(source.url);
-                        fileBlob = await res.blob();
-                    } catch (err) { return; }
+                        const urlParts = source.url.split('/public/media/');
+                        if (urlParts.length > 1) {
+                            const storagePath = decodeURIComponent(urlParts[1]);
+                            const { data, error } = await supabase.storage.from('media').download(storagePath);
+                            if (error) throw error;
+                            fileBlob = data;
+                        } else {
+                            const res = await fetch(source.url);
+                            if (!res.ok) throw new Error("Fetch failed");
+                            fileBlob = await res.blob();
+                        }
+                    } catch (err) { setReAnalysisError("Could not retrieve media file."); return; }
                 }
                 if (!fileBlob) return;
-                const indicesToFix = selectedIndices.length > 0 ? selectedIndices : (activeIndex !== -1 ? [activeIndex] : []);
+
+                const indicesToFix = selectedIndices.length > 0 ? [...selectedIndices].sort((a, b) => a - b) : (activeIndex !== -1 ? [activeIndex] : []);
                 if (indicesToFix.length === 0) return;
+
                 const startIdx = indicesToFix[0];
                 const endIdx = indicesToFix[indicesToFix.length - 1];
+                const startTime = transcript[startIdx].start;
+                const endTime = transcript[endIdx].end;
+
                 setIsReAnalyzing(true);
                 try {
-                    const newSegments = await fetchBatchReAnalysis(geminiKey, fileBlob, transcript[startIdx].start, transcript[endIdx].end, correctionHint);
+                    const newSegments = await fetchBatchReAnalysis(geminiKey, fileBlob, startTime, endTime, correctionHint);
+                    if (!Array.isArray(newSegments)) throw new Error("Invalid format");
                     setReAnalysisPreview({ startIdx, endIdx, segments: newSegments });
-                } catch (err) { setReAnalysisError(err.message); }
-                setIsReAnalyzing(false);
+                } catch (err) { setReAnalysisError("Re-analysis failed: " + err.message); } finally { setIsReAnalyzing(false); }
             };
 
             const confirmReAnalysis = async () => {
@@ -714,37 +659,88 @@ Output JSON only:` }];
                 const newTranscript = [...transcript];
                 newTranscript.splice(startIdx, (endIdx - startIdx + 1), ...segments);
                 setTranscript(newTranscript);
+                if (user && source.id) { await supabase.from('transcripts').update({ content: newTranscript }).eq('id', source.id); fetchHistory(); }
+                setReAnalysisPreview(null); setCorrectionHint(""); setSelectedIndices([]); setLastSelectedIndex(null); setFixPanelOpen(false);
+            };
 
+            // --- MANUAL EDIT LOGIC ---
+            const handleManualEditOpen = (e, index) => {
+                e.stopPropagation();
+                setEditingIndex(index);
+                setManualEndTime(transcript[index].end);
+                setFixPanelMode('manual');
+                setFixPanelOpen(true);
+                // Pause playback to focus on edit
+                setIsPlaying(false);
+                setCurrentTime(transcript[index].start);
+                setSeekTrigger(prev => prev + 1);
+            };
+
+            const confirmManualEdit = async () => {
+                if (editingIndex === null) return;
+                
+                let newTranscript = [...transcript];
+                const oldEnd = newTranscript[editingIndex].end;
+                const newEnd = Number(manualEndTime);
+                const diff = newEnd - oldEnd;
+
+                // 1. Update Current End
+                newTranscript[editingIndex].end = newEnd;
+
+                // 2. Adjust Chain
+                if (editingIndex + 1 < newTranscript.length) {
+                    newTranscript[editingIndex + 1].start = newEnd;
+                }
+
+                // 3. Shift Following if requested
+                if (shiftFollowing) {
+                    for (let i = editingIndex + 1; i < newTranscript.length; i++) {
+                        // Current logic: next start is already set to newEnd above.
+                        // We need to shift the END of the next one by diff, and so on.
+                        newTranscript[i].end = newTranscript[i].end + diff;
+                        // Update start of i+1 based on i.end
+                        if (i + 1 < newTranscript.length) {
+                            newTranscript[i + 1].start = newTranscript[i].end;
+                        }
+                    }
+                }
+
+                // Sanity check for negative durations or overlaps if not shifting
+                if (!shiftFollowing && editingIndex + 1 < newTranscript.length) {
+                    if (newTranscript[editingIndex + 1].start >= newTranscript[editingIndex + 1].end) {
+                         // Simple fix: bump the next end to be start + 0.1
+                         newTranscript[editingIndex + 1].end = newTranscript[editingIndex + 1].start + 0.1;
+                    }
+                }
+
+                setTranscript(newTranscript);
+                
+                // Save to DB
                 if (user && source.id) {
                     await supabase.from('transcripts').update({ content: newTranscript }).eq('id', source.id);
                     fetchHistory();
                 }
 
-                setReAnalysisPreview(null);
-                setCorrectionHint("");
-                setSelectedIndices([]);
-                setLastSelectedIndex(null);
                 setFixPanelOpen(false);
+                setEditingIndex(null);
             };
+
+            const playManualRange = () => {
+                if (editingIndex === null) return;
+                const start = transcript[editingIndex].start;
+                setCurrentTime(start);
+                setSeekTrigger(prev => prev + 1);
+                setIsPlaying(true);
+                setStopAtTime(manualEndTime);
+            };
+
 
             const handleShare = (item) => {
                 const shareLink = `${window.location.origin}${window.location.pathname}?share=${item.id}`;
-                const textArea = document.createElement("textarea");
-                textArea.value = shareLink;
-                textArea.style.position = "fixed";
-                textArea.style.left = "-9999px";
-                textArea.style.top = "0";
-                document.body.appendChild(textArea);
-                textArea.focus();
-                textArea.select();
-                try {
-                    document.execCommand('copy');
+                navigator.clipboard.writeText(shareLink).then(() => {
                     setShareToastVisible(true);
                     setTimeout(() => setShareToastVisible(false), 3000);
-                } catch (err) {
-                    console.error('Copy failed', err);
-                }
-                document.body.removeChild(textArea);
+                });
             };
 
             const handleTranscriptSeek = (index) => {
@@ -783,20 +779,12 @@ Output JSON only:` }];
             const selectAllAfter = (idx) => {
                 const range = Array.from({ length: transcript.length - idx }, (_, i) => idx + i);
                 setSelectedIndices(range);
+                setFixPanelMode('ai');
                 setFixPanelOpen(true);
             };
 
-            const saveVocabWord = async () => {
-                if (!analysis || !user) return;
-                const { error } = await supabase.from('user_vocabulary').insert([{ user_id: user.id, word: analysis.content, definition: analysis.meaning, example: "" }]);
-                if (!error) fetchVocabulary(user.id);
-            };
-            const deleteVocabWord = async (id) => {
-                await supabase.from('user_vocabulary').delete().eq('id', id);
-                fetchVocabulary(user.id);
-            };
             const triggerAnalysis = async () => {
-                if (transcriptOpen) setTranscriptOpen(false);
+                autoCollapseTranscript();
                 const sentence = transcript[activeIndex]?.text;
                 if (!sentence) return;
                 setIsAnalyzing(true);
@@ -807,6 +795,7 @@ Output JSON only:` }];
                     if (activeTab === 'Shadowing') setActiveTab('Meaning and Grammar');
                 } catch (err) { console.error(err); setIsAnalyzing(false); }
             };
+
             const startRecording = async () => {
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -819,9 +808,15 @@ Output JSON only:` }];
                     setIsRecording(true);
                 } catch (e) { console.error(e); }
             };
+
             const stopRecording = () => {
-                if(recorder) { recorder.stop(); setIsRecording(false); }
+                if (recorder) {
+                    recorder.stop();
+                    recorder.stream.getTracks().forEach(t => t.stop());
+                    setIsRecording(false);
+                }
             };
+
             const saveRecording = async () => {
                 if (!recordedBlob || !user) return;
                 setIsSavingRecord(true);
@@ -835,21 +830,19 @@ Output JSON only:` }];
                 }
                 setIsSavingRecord(false);
             };
+
             const deleteRecording = async (id) => {
                 await supabase.from('user_recordings').delete().eq('id', id);
                 fetchRecordings(user.id);
             };
 
-            const loadSession = (item) => { 
-                let content = item.content || [];
-                if (typeof content === 'string') {
-                    try { content = JSON.parse(content); } catch (e) { content = []; }
-                }
-                // Ensure IDs exist for editing
-                const contentWithIds = Array.isArray(content) ? content.map((s,i) => ({...s, id: s.id || i})) : [];
-                setTranscript(contentWithIds); 
-                setSource({ id: item.id, type: 'file', mediaType: item.source_type, url: item.source_url, title: item.title, fileData: null }); 
-                setIsPlaying(false); 
+            const handleAuth = async (email, password, mode) => {
+                const { error } = (mode === 'signup') 
+                    ? await supabase.auth.signUp({ email, password }) 
+                    : await supabase.auth.signInWithPassword({ email, password });
+                if (error) return error.message;
+                setIsLoginOpen(false);
+                return null;
             };
 
             const renderDictationSlots = () => {
@@ -890,21 +883,22 @@ Output JSON only:` }];
                 );
             };
 
+            const loadSession = (item) => { 
+                let content = item.content || [];
+                if (typeof content === 'string') {
+                    try { content = JSON.parse(content); } catch (e) { content = []; }
+                }
+                setTranscript(Array.isArray(content) ? content : []); 
+                setSource({ id: item.id, type: 'file', mediaType: item.source_type, url: item.source_url, title: item.title, fileData: null }); 
+                setIsPlaying(false); 
+            };
+
             return (
                 <div className="h-full flex flex-col font-sans text-gray-900 bg-white fade-in overflow-hidden relative">
                     <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} onLogin={handleAuth} />
                     <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} apiKey={geminiKey} onSave={saveSettings} />
                     <VocabularyModal isOpen={isVocabOpen} onClose={() => setIsVocabOpen(false)} words={vocabulary} onDelete={deleteVocabWord} />
-                    
-                    {/* NEW: Edit Timestamp Panel */}
-                    <EditTimestampPanel 
-                        isOpen={editPanelOpen} 
-                        onClose={() => setEditPanelOpen(false)} 
-                        segment={editingSegment} 
-                        onSave={handleUpdateTimestamp} 
-                    />
-
-                    <ConfirmModal isOpen={isReplaceConfirmOpen} title="Replace Session?" message="Exists. Replace?" onConfirm={() => { if(pendingFile) processFileUpload(pendingFile); setIsReplaceConfirmOpen(false); }} onClose={() => setIsReplaceConfirmOpen(false)} />
+                    <ConfirmModal isOpen={isReplaceConfirmOpen} title="Replace Session?" message="A session already exists for this file. Would you like to replace it?" onConfirm={() => { if (pendingFile) processFileUpload(pendingFile); setIsReplaceConfirmOpen(false); }} onCancel={() => setIsReplaceConfirmOpen(false)} />
 
                     {shareToastVisible && (
                         <div className="share-toast px-6 py-3 bg-emerald-600 text-white rounded-full shadow-2xl font-bold flex items-center gap-2">
@@ -912,36 +906,79 @@ Output JSON only:` }];
                         </div>
                     )}
 
-                    {/* Fix Transcript Popup */}
+                    {/* EDIT TOOLS PANEL (LEFT) */}
                     <div className={`fixed inset-y-0 left-0 z-40 w-80 bg-white border-r shadow-2xl transition-transform duration-300 ease-in-out transform ${fixPanelOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                         <div className="h-full flex flex-col">
-                            <div className="p-4 border-b bg-red-50 flex justify-between items-center">
-                                <div className="flex items-center gap-2 font-bold text-red-900"><AlertTriangle size={18} /> Fix Transcript</div>
-                                <button onClick={() => { setFixPanelOpen(false); setReAnalysisPreview(null); }} className="p-1 hover:bg-red-100 rounded-full text-red-400"><X size={20} /></button>
+                            <div className={`p-4 border-b flex justify-between items-center ${fixPanelMode === 'ai' ? 'bg-red-50' : 'bg-indigo-50'}`}>
+                                <div className={`flex items-center gap-2 font-bold ${fixPanelMode === 'ai' ? 'text-red-900' : 'text-indigo-900'}`}>
+                                    {fixPanelMode === 'ai' ? <><Wand2 size={18} /> AI Fix</> : <><Pencil size={18} /> Manual Edit</>}
+                                </div>
+                                <button onClick={() => { setFixPanelOpen(false); setReAnalysisPreview(null); setEditingIndex(null); }} className="p-1 hover:bg-white/50 rounded-full"><X size={20} /></button>
                             </div>
+                            
                             <div className="flex-1 p-6 space-y-6 overflow-y-auto custom-scrollbar">
-                                {!reAnalysisPreview ? (
-                                    <div className="space-y-4">
-                                        <h4 className="text-sm font-bold text-gray-600">{selectedIndices.length > 0 ? `${selectedIndices.length} segments selected` : 'No segments selected'}</h4>
-                                        <textarea placeholder="Enter correction hints here..." className="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-red-500 min-h-[150px]" value={correctionHint} onChange={(e) => setCorrectionHint(e.target.value)} />
-                                        {reAnalysisError && <div className="p-3 bg-red-50 text-red-600 text-[10px] rounded-xl font-medium border border-red-100">{reAnalysisError}</div>}
-                                        <button onClick={handleReAnalyze} disabled={isReAnalyzing || (selectedIndices.length === 0 && activeIndex === -1)} className="w-full py-4 bg-red-600 text-white font-bold rounded-2xl flex items-center justify-center gap-2 hover:bg-red-700 transition-all disabled:opacity-50">{isReAnalyzing ? <Spinner /> : <><Wand2 size={16} /> Re-analyze</>}</button>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4">
-                                        <h4 className="text-sm font-bold text-gray-600">Review Changes</h4>
-                                        <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                                            {reAnalysisPreview.segments.map((seg, i) => (
-                                                <div key={i} className="p-2 bg-emerald-50 rounded-lg border border-emerald-100 text-[10px]">
-                                                    <div className="font-bold mb-1">{formatTime(seg.start)} - {formatTime(seg.end)}</div>
-                                                    <div>{seg.text}</div>
-                                                </div>
-                                            ))}
+                                {fixPanelMode === 'ai' && (
+                                    !reAnalysisPreview ? (
+                                        <div className="space-y-4">
+                                            <h4 className="text-sm font-bold text-gray-600">{selectedIndices.length > 0 ? `${selectedIndices.length} segments selected` : 'No segments selected'}</h4>
+                                            <textarea placeholder="Enter correction hints here..." className="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-red-500 min-h-[150px]" value={correctionHint} onChange={(e) => setCorrectionHint(e.target.value)} />
+                                            {reAnalysisError && <div className="p-3 bg-red-50 text-red-600 text-[10px] rounded-xl font-medium border border-red-100">{reAnalysisError}</div>}
+                                            <button onClick={handleReAnalyze} disabled={isReAnalyzing || (selectedIndices.length === 0 && activeIndex === -1)} className="w-full py-4 bg-red-600 text-white font-bold rounded-2xl flex items-center justify-center gap-2 hover:bg-red-700 transition-all disabled:opacity-50">{isReAnalyzing ? <Spinner /> : <><Wand2 size={16} /> Re-analyze</>}</button>
                                         </div>
-                                        <div className="p-3 bg-blue-50 text-blue-800 text-[10px] rounded-lg">Confirming will permanently update the database record.</div>
-                                        <div className="flex gap-2 pt-4">
-                                            <button onClick={() => setReAnalysisPreview(null)} className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl text-xs">Back</button>
-                                            <button onClick={confirmReAnalysis} className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl text-xs shadow-md">Confirm & Update</button>
+                                    ) : (
+                                        <div className="space-y-4">
+                                            <h4 className="text-sm font-bold text-gray-600">Review Changes</h4>
+                                            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                                                {reAnalysisPreview.segments.map((seg, i) => (
+                                                    <div key={i} className="p-2 bg-emerald-50 rounded-lg border border-emerald-100 text-[10px]">
+                                                        <div className="font-bold mb-1">{formatTime(seg.start)} - {formatTime(seg.end)}</div>
+                                                        <div>{seg.text}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <div className="flex gap-2 pt-4">
+                                                <button onClick={() => setReAnalysisPreview(null)} className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl text-xs">Back</button>
+                                                <button onClick={confirmReAnalysis} className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl text-xs shadow-md">Confirm</button>
+                                            </div>
+                                        </div>
+                                    )
+                                )}
+
+                                {fixPanelMode === 'manual' && editingIndex !== null && (
+                                    <div className="space-y-6 fade-in">
+                                        <div className="p-4 bg-gray-50 border border-gray-100 rounded-2xl">
+                                            <span className="text-[10px] font-bold text-gray-400 uppercase">Text</span>
+                                            <p className="text-sm font-medium mt-1">{transcript[editingIndex].text}</p>
+                                        </div>
+                                        
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2"><Clock size={12}/> Start Time</label>
+                                            <div className="w-full px-4 py-3 bg-gray-100 border-none rounded-xl text-lg font-mono text-gray-500 flex justify-between items-center">
+                                                {formatTime(transcript[editingIndex].start)}
+                                                <span className="text-[10px] text-gray-400">Fixed to Prev</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2"><Clock size={12}/> End Time (Sec)</label>
+                                            <div className="flex items-center gap-2">
+                                                <button onClick={() => setManualEndTime(p => Math.max(transcript[editingIndex].start + 0.1, Number(p) - 0.1))} className="p-3 bg-gray-100 hover:bg-gray-200 rounded-xl font-bold">-</button>
+                                                <input type="number" step="0.01" className="flex-1 px-4 py-3 bg-white border border-indigo-100 focus:border-indigo-500 rounded-xl text-lg font-mono text-center font-bold outline-none shadow-sm" value={Number(manualEndTime).toFixed(3)} onChange={(e) => setManualEndTime(Number(e.target.value))} />
+                                                <button onClick={() => setManualEndTime(p => Number(p) + 0.1)} className="p-3 bg-gray-100 hover:bg-gray-200 rounded-xl font-bold">+</button>
+                                            </div>
+                                            <p className="text-center text-xs font-mono text-indigo-600">{formatTime(manualEndTime)}</p>
+                                        </div>
+
+                                        <div className="flex items-center gap-3 p-3 bg-yellow-50 rounded-xl border border-yellow-100">
+                                            <input type="checkbox" id="shiftFollow" checked={shiftFollowing} onChange={e => setShiftFollowing(e.target.checked)} className="w-4 h-4 text-indigo-600 rounded" />
+                                            <label htmlFor="shiftFollow" className="text-xs font-bold text-yellow-800 cursor-pointer select-none">Shift all following timestamps?</label>
+                                        </div>
+
+                                        <button onClick={playManualRange} className="w-full py-3 bg-indigo-50 text-indigo-600 font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-100 transition-all text-xs border border-indigo-100"><Play size={14} /> Test Selection (Start to New End)</button>
+
+                                        <div className="pt-4 border-t border-gray-100 flex gap-3">
+                                            <button onClick={() => setFixPanelOpen(false)} className="flex-1 py-3 bg-white border border-gray-200 text-gray-600 font-bold rounded-xl hover:bg-gray-50 text-xs">Cancel</button>
+                                            <button onClick={confirmManualEdit} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg text-xs">Save & Update</button>
                                         </div>
                                     </div>
                                 )}
@@ -950,7 +987,7 @@ Output JSON only:` }];
                     </div>
 
                     <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center z-20 shadow-none">
-                        <div className="flex items-center gap-3"><div className="bg-black p-2 rounded-lg"><Sparkles className="text-white w-5 h-5" /></div><h1 className="text-xl font-bold text-black tracking-tight">LingoMate <span className="text-xs text-white bg-black px-1.5 ml-1 rounded-md italic font-normal">Listening Practice</span></h1></div>
+                        <div className="flex items-center gap-3"><div className="bg-black p-2 rounded-lg"><Volume2 className="text-white w-5 h-5" /></div><h1 className="text-xl font-bold text-black tracking-tight">LingoMate <span className="text-xs text-white bg-black px-1.5 ml-1 rounded-md italic font-normal">Listening Practice</span></h1></div>
                         <div className="flex items-center gap-2">
                             <button onClick={() => setIsVocabOpen(true)} className="flex items-center gap-2 px-4 py-2 hover:bg-gray-50 rounded-full transition-colors font-semibold text-sm text-gray-600"><BookOpen className="w-4 h-4" /> Vocabulary</button>
                             <button onClick={() => setIsSettingsOpen(true)} className={`p-2 transition-all ${!geminiKey ? 'text-red-500 animate-pulse' : 'text-gray-400'}`}><Settings className="w-5 h-5" /></button>
@@ -1009,14 +1046,14 @@ Output JSON only:` }];
                                         </div>
                                     ) : (
                                         <div className="space-y-4 fade-in">
-                                            <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={currentTime} onTimeUpdate={handleTimeUpdate} stopAtTime={stopAtTime} setStopAtTime={setStopAtTime} seekTrigger={seekTrigger} loopRange={loopRange} />
+                                            <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={currentTime} onTimeUpdate={handleTimeUpdate} loopRange={loopRange} seekTrigger={seekTrigger} />
                                             
                                             <div className="bg-white border border-gray-100 p-4 rounded-2xl shadow-sm flex items-center justify-between px-6 transition-all">
                                                 <div className="flex items-center gap-4">
                                                     <button onClick={() => { setIsPlaying(!isPlaying); setStopAtTime(null); }} className="w-10 h-10 bg-black text-white flex items-center justify-center rounded-full hover:scale-105 active:scale-95 transition-all">
                                                         {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
                                                     </button>
-                                                    <div className="font-mono text-xs font-bold text-gray-500 tabular-nums bg-gray-50 px-3 py-1 rounded-md border border-gray-100">
+                                                    <div className="font-mono text-xs font-bold text-gray-500 tabular-nums bg-gray-50 px-3 py-1 rounded-md border border-gray-100 min-w-[80px] text-center">
                                                         {formatTime(currentTime)}
                                                     </div>
                                                 </div>
@@ -1031,7 +1068,7 @@ Output JSON only:` }];
                                                     {['Shadowing', 'Dictation', 'Translation', 'Grammar'].map(tab => (
                                                         <button key={tab} onClick={() => { 
                                                             setActiveTab(tab === 'Grammar' ? 'Meaning and Grammar' : tab); 
-                                                            if (transcriptOpen) setTranscriptOpen(false); 
+                                                            autoCollapseTranscript(); 
                                                         }} className={`flex-1 py-4 text-[11px] font-bold border-b-2 transition-all ${activeTab === tab || (activeTab === 'Meaning and Grammar' && tab === 'Grammar') ? 'border-black text-black bg-white' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>{tab}</button>
                                                     ))}
                                                 </div>
@@ -1039,7 +1076,7 @@ Output JSON only:` }];
                                                     {activeTab === 'Shadowing' && (
                                                         <div className="space-y-8 fade-in">
                                                             <div className="flex flex-col space-y-4"><div className="flex items-center justify-between px-1"><label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2"><Layers size={12} /> Practice chunk size</label><select value={chunkSize} onChange={(e) => setChunkSize(e.target.value)} className="text-xs font-bold border-none bg-gray-50 rounded-lg px-2 py-1 outline-none"><option value="single">Single sentence</option><option value="5-8">5-8 seconds</option><option value="15-18">15-18 seconds</option><option value="30-35">30-35 seconds</option><option value="60-65">60-65 seconds</option></select></div>
-                                                                <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptSeek(Math.max(0, activeIndex - 1))} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptSeek(Math.min(transcript.length - 1, activeIndex + 1))} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
+                                                                <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptSeek(activeIndex - 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptSeek(activeIndex + 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
                                                             </div>
                                                             <div className="p-6 bg-gray-50 rounded-3xl border border-gray-100 space-y-4">
                                                                 <div className="flex items-center justify-between"><h4 className="text-sm font-bold text-gray-600 flex items-center gap-2"><Mic size={16} /> Voice record</h4>{recordingsList.length >= 30 && <span className="text-[9px] font-bold text-red-400 uppercase tracking-widest">Limit : 30</span>}</div>
@@ -1048,14 +1085,17 @@ Output JSON only:` }];
                                                             </div>
                                                         </div>
                                                     )}
+                                                    {/* Other tabs remain same... (Dictation, Translation, Grammar) */}
                                                     {activeTab === 'Dictation' && (
                                                         <div className="h-full flex flex-col space-y-6 fade-in">
+                                                            <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptSeek(activeIndex - 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptSeek(activeIndex + 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
                                                             <div className="p-10 bg-gray-50 rounded-[2.5rem] border border-gray-100 min-h-[300px] flex flex-col items-center justify-center overflow-y-auto custom-scrollbar gap-8">{showDictationContent && <div className="w-full text-center px-6 py-4 bg-white/50 rounded-2xl border border-gray-200 fade-in"><p className="text-lg font-semibold text-gray-900 leading-relaxed">{transcript[activeIndex]?.text}</p></div>}{renderDictationSlots()}</div>
                                                             <div className="flex flex-wrap justify-center items-center gap-4 px-2"><button onClick={() => { setDictationChecked(true); }} className="px-8 py-3 bg-black text-white text-sm font-bold rounded-2xl shadow-md">Check spelling</button><button onClick={() => setShowDictationContent(!showDictationContent)} className="px-8 py-3 bg-white border border-gray-200 text-gray-700 text-sm font-bold rounded-2xl hover:bg-gray-50 transition-all flex items-center gap-2"><Eye size={16} /> {showDictationContent ? "Hide content" : "Show content"}</button>{showDictationContent && <button onClick={triggerAnalysis} disabled={isAnalyzing} className="px-8 py-3 bg-blue-600 text-white text-sm font-bold rounded-2xl shadow-md hover:bg-blue-700 transition-all flex items-center gap-2">{isAnalyzing ? <Spinner /> : <Book size={16} />} Analyze</button>}</div>
                                                         </div>
                                                     )}
                                                     {activeTab === 'Translation' && (
                                                         <div className="h-full flex flex-col space-y-6 fade-in">
+                                                            <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptSeek(activeIndex - 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptSeek(activeIndex + 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
                                                             <div className="flex-1 flex flex-col gap-4">
                                                                 <label className="text-xs font-bold text-gray-400 uppercase px-1 tracking-widest">Source sentence</label>
                                                                 <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100"><p className="text-lg font-semibold text-gray-900 leading-relaxed italic">{transcript[activeIndex]?.text || "Select a segment to practice"}</p></div>
@@ -1088,11 +1128,11 @@ Output JSON only:` }];
                             <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[450px]">
                                 <h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><FileText size={16} /> Full Transcript</h2>
                                 <div className="flex items-center gap-2">
-                                    <button onClick={() => setFixPanelOpen(!fixPanelOpen)} title="Fix Transcript" className={`p-2 rounded-lg transition-all ${fixPanelOpen ? 'bg-red-100 text-red-600' : 'text-gray-400'}`}><Wand2 size={18} /></button>
+                                    <button onClick={() => { setFixPanelMode('ai'); setFixPanelOpen(!fixPanelOpen); }} title="AI Fix Tools" className={`p-2 rounded-lg transition-all ${fixPanelOpen && fixPanelMode === 'ai' ? 'bg-red-100 text-red-600' : 'text-gray-400 hover:text-red-500'}`}><Wand2 size={18} /></button>
                                     <button onClick={() => setTranscriptOpen(false)} className="p-1.5 rounded-lg text-gray-400 transition-colors"><ChevronRight size={18} /></button>
                                 </div>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-[450px] custom-scrollbar pb-24 bg-gray-50/30" ref={transcriptRef}>
+                            <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-[450px] custom-scrollbar pb-24 bg-gray-50/30">
                                 <div className="text-[10px] text-gray-400 font-medium px-2 mb-2 italic flex justify-between items-center">
                                     <span>Tip: Use Ctrl+Shift to multiselect</span>
                                     {selectedIndices.length > 0 && <button onClick={() => { setSelectedIndices([]); setLastSelectedIndex(null); }} className="text-indigo-600 font-bold hover:underline">Clear Selection</button>}
@@ -1106,9 +1146,14 @@ Output JSON only:` }];
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex justify-between items-center mb-1 text-[9px] font-bold uppercase tracking-wider opacity-60"><span>{s.speaker || 'Speaker'}</span><span>{formatTime(s.start)} - {formatTime(s.end)}</span></div>
                                                 <p className="text-sm font-medium leading-relaxed pr-8">{s.text}</p>
-                                                {(isSelected || isActive) && (<button title="Select all segments after this" onClick={(e) => { e.stopPropagation(); selectAllAfter(idx); }} className={`absolute right-3 bottom-3 p-1.5 rounded-lg transition-all ${isSelected ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'}`}><ListChecks size={14} /></button>)}
-                                                {/* Edit Button */}
-                                                <button title="Edit Timestamp" onClick={(e) => openEditPanel(e, s)} className="absolute right-2 top-2 p-1.5 rounded-lg bg-gray-100 text-gray-500 hover:bg-black hover:text-white opacity-0 group-hover:opacity-100 transition-all"><Edit2 size={12} /></button>
+                                                
+                                                {/* Action Buttons */}
+                                                <div className={`absolute right-3 bottom-3 flex gap-1 ${isSelected || isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+                                                    <button title="Edit Timestamp" onClick={(e) => handleManualEditOpen(e, idx)} className={`p-1.5 rounded-lg transition-all ${isSelected ? 'bg-white/20 text-white hover:bg-white/30' : isActive ? 'bg-white/20 text-white hover:bg-white/30' : 'bg-gray-100 text-gray-600 hover:bg-indigo-100 hover:text-indigo-600'}`}>
+                                                        <Pencil size={14} />
+                                                    </button>
+                                                    {(isSelected || isActive) && (<button title="Select all after" onClick={(e) => { e.stopPropagation(); selectAllAfter(idx); }} className={`p-1.5 rounded-lg transition-all ${isSelected ? 'bg-white/20 text-white' : isActive ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'}`}><ListChecks size={14} /></button>)}
+                                                </div>
                                             </div>
                                         </div>
                                     );
