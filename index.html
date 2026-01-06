@@ -87,7 +87,7 @@
             return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
         };
 
-        // --- TRANSCRIPTION LOGIC (Hardened Prompt + Zipper) ---
+        // --- TRANSCRIPTION LOGIC (Zipper Logic Preserved) ---
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
             
@@ -146,17 +146,18 @@
 
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                // PROMPT: HARDENED TO PREVENT GROUPING
-                parts = [filePart, { text: `You are a precision audio alignment engine.
+                // PROMPT: IMPROVED FOR LINGUISTIC SPLITTING (NO MATH)
+                parts = [filePart, { text: `You are a precision audio alignment engine designed for subtitle synchronization.
 I will provide an audio file.
-Your task: Transcribe it into **GRANULAR, INDIVIDUAL SENTENCES**.
+Your task: Transcribe it into **INDIVIDUAL SENTENCES**.
 
-CRITICAL RULES:
-1. **NO GROUPING**: Never merge multiple sentences into one timestamp. Split strictly at every period (.), question mark (?), or exclamation point (!).
-2. **SHORT SEGMENTS**: If a sentence is very long (>15s), split it at logical clauses (commas).
-3. **TIMESTAMPS**: 
+CRITICAL INSTRUCTIONS:
+1. **ONE SENTENCE PER TIMESTAMP**: You must create a new timestamp segment for every single grammatical sentence. Do not combine multiple sentences into a single block.
+2. **STRICT SPLITTING**: Split segments strictly at every period (.), question mark (?), or exclamation point (!).
+3. **TIMING**: 
    - "start": exact start of the first word.
    - "end": exact end of the last word.
+   - Ensure timestamps cover the spoken audio sequentially.
 4. **FORMAT**: Return strictly a JSON Array: 
    [ { "text": "string", "start": number, "end": number } ]
 
@@ -265,6 +266,7 @@ Output JSON only:` }];
         };
 
         // --- MAIN APPLICATION ---
+
         function App() {
             const [user, setUser] = useState(null);
             const [isLoginOpen, setIsLoginOpen] = useState(false);
@@ -291,59 +293,91 @@ Output JSON only:` }];
             const [activeTab, setActiveTab] = useState('Shadowing');
             const [chunkSize, setChunkSize] = useState('single'); 
 
-            // Features
             const [dictationValues, setDictationValues] = useState({});
             const [dictationChecked, setDictationChecked] = useState(false);
             const [showDictationContent, setShowDictationContent] = useState(false);
             const [analysis, setAnalysis] = useState(null);
             const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+            // Translation Practice States
             const [translationAttempt, setTranslationAttempt] = useState("");
             const [showTranslationAnswer, setShowTranslationAnswer] = useState(false);
-            
-            // Recording
+
             const [isRecording, setIsRecording] = useState(false);
             const [recorder, setRecorder] = useState(null);
             const [recordedBlob, setRecordedBlob] = useState(null);
             const [recordingsList, setRecordingsList] = useState([]);
             const [isSavingRecord, setIsSavingRecord] = useState(false);
 
-            // Re-analysis
+            // Re-analysis State
             const [correctionHint, setCorrectionHint] = useState("");
             const [isReAnalyzing, setIsReAnalyzing] = useState(false);
             const [reAnalysisError, setReAnalysisError] = useState(null);
             const [selectedIndices, setSelectedIndices] = useState([]);
             const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
             const [reAnalysisPreview, setReAnalysisPreview] = useState(null);
+
             const [shareToastVisible, setShareToastVisible] = useState(false);
+            const [selectionState, setSelectionState] = useState({ visible: false, x: 0, y: 0, text: '' });
+
+            const formatTime = (s) => {
+                if (s === undefined || s === null) return "0:00";
+                return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
+            };
 
             const activeIndex = transcript.findIndex((s, idx) => {
-                return currentTime >= s.start && currentTime < s.end;
+                const nextStart = transcript[idx + 1]?.start || Infinity;
+                return currentTime >= s.start && currentTime < nextStart;
             });
 
-            // Auto-scroll
-            const transcriptRef = useRef(null);
-            useEffect(() => {
-                if (activeIndex !== -1 && transcriptRef.current) {
-                    const activeEl = transcriptRef.current.children[activeIndex];
-                    if (activeEl) {
-                        activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                }
-            }, [activeIndex]);
+            const autoCollapseTranscript = () => { if (transcriptOpen) setTranscriptOpen(false); };
 
-            // Init Data
+            useEffect(() => {
+                if (!source) { 
+                    setSidebarOpen(true); 
+                    setTranscriptOpen(false);
+                } else { 
+                    setSidebarOpen(false); 
+                    setTranscriptOpen(true);
+                }
+            }, [source]);
+
+            useEffect(() => {
+                setDictationValues({}); setDictationChecked(false); setShowDictationContent(false); setAnalysis(null);
+                setCorrectionHint("");
+                setTranslationAttempt("");
+                setShowTranslationAnswer(false);
+            }, [transcript, seekTrigger]);
+
             useEffect(() => {
                 const init = async () => {
-                    const { data: userData } = await supabase.auth.getUser();
-                    if (userData.user) {
-                        setUser(userData.user);
-                        fetchSettings(userData.user.id);
-                        fetchRecordings(userData.user.id);
-                        fetchVocabulary(userData.user.id);
-                        fetchHistory();
-                    }
+                    try {
+                        const { data: userData } = await supabase.auth.getUser();
+                        if (userData.user) {
+                            setUser(userData.user);
+                            fetchSettings(userData.user.id);
+                            fetchRecordings(userData.user.id);
+                            fetchVocabulary(userData.user.id);
+                            fetchHistory();
+                        }
+
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const shareId = urlParams.get('share');
+                        if (shareId) {
+                            const { data: sharedData, error: sharedError } = await supabase
+                                .from('transcripts')
+                                .select('*')
+                                .eq('id', shareId)
+                                .single();
+                            
+                            if (sharedData && !sharedError) {
+                                loadSession(sharedData);
+                            }
+                        }
+                    } catch (err) { console.error(err); }
                 };
                 init();
+
                 const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
                     const cu = session?.user ?? null; 
                     setUser(cu); 
@@ -354,36 +388,80 @@ Output JSON only:` }];
                         fetchHistory();
                     }
                 });
-                return () => { if (subscription) subscription.unsubscribe(); };
+
+                const handleMouseUp = () => {
+                    const sel = window.getSelection();
+                    if (!sel || sel.rangeCount === 0) return;
+                    const text = sel.toString().trim();
+                    if (text && text.length > 0 && text.length < 50) {
+                        const range = sel.getRangeAt(0);
+                        const rect = range.getBoundingClientRect();
+                        setSelectionState({
+                            visible: true,
+                            x: rect.left + (rect.width / 2),
+                            y: rect.top + window.scrollY,
+                            text: text
+                        });
+                    } else {
+                        setSelectionState(prev => ({ ...prev, visible: false }));
+                    }
+                };
+
+                document.addEventListener('mouseup', handleMouseUp);
+                return () => { 
+                    if (subscription) subscription.unsubscribe(); 
+                    document.removeEventListener('mouseup', handleMouseUp);
+                };
             }, []);
 
             const fetchSettings = async (uid) => {
                 const { data } = await supabase.from('user_settings').select('gemini_api_key').eq('user_id', uid).single();
                 if (data?.gemini_api_key) setGeminiKey(data.gemini_api_key);
             };
+
             const saveSettings = async (nk) => {
                 setGeminiKey(nk);
                 if (user) await supabase.from('user_settings').upsert({ user_id: user.id, gemini_api_key: nk });
             };
+
             const fetchHistory = async () => {
                 const { data } = await supabase.from('transcripts').select('*').order('created_at', { ascending: false });
                 if (data) setHistory(data);
             };
+
             const fetchRecordings = async (uid) => {
                 const { data } = await supabase.from('user_recordings').select('*').eq('user_id', uid).order('created_at', { ascending: false });
                 if (data) setRecordingsList(data);
             };
+
             const fetchVocabulary = async (uid) => {
                 const { data } = await supabase.from('user_vocabulary').select('*').eq('user_id', uid).order('created_at', { ascending: false });
                 if (data) setVocabulary(data);
             };
-            const handleAuth = async (email, password, mode) => {
-                const { error } = (mode === 'signup') 
-                    ? await supabase.auth.signUp({ email, password }) 
-                    : await supabase.auth.signInWithPassword({ email, password });
-                if (error) return error.message;
-                setIsLoginOpen(false);
-                return null;
+
+            const saveSelectionToVocab = async () => {
+                if (!user) { setIsLoginOpen(true); return; }
+                const { error } = await supabase.from('user_vocabulary').insert([{ 
+                    user_id: user.id, 
+                    word: selectionState.text, 
+                    definition: "Added from selection", 
+                    example: "" 
+                }]);
+                if (!error) { 
+                    fetchVocabulary(user.id); 
+                    setSelectionState(prev => ({ ...prev, visible: false }));
+                }
+            };
+
+            const saveVocabWord = async () => {
+                if (!analysis || !user) return;
+                const { error } = await supabase.from('user_vocabulary').insert([{ user_id: user.id, word: analysis.content, definition: analysis.meaning, example: "" }]);
+                if (!error) { fetchVocabulary(user.id); }
+            };
+
+            const deleteVocabWord = async (id) => {
+                const { error } = await supabase.from('user_vocabulary').delete().eq('id', id);
+                if (!error) fetchVocabulary(user.id);
             };
 
             const handleFileUpload = async (e) => {
@@ -413,16 +491,19 @@ Output JSON only:` }];
                         const filePath = `${user.id}/${Date.now()}_${sanitizedTitle}`;
                         await supabase.storage.from('media').upload(filePath, source.fileData, { cacheControl: '3600', upsert: true });
                         const { data: urlData } = supabase.storage.from('media').getPublicUrl(filePath);
-                        await supabase.from('transcripts').upsert({ user_id: user.id, title: source.title, source_type: source.mediaType, source_url: urlData.publicUrl, content: result }, { onConflict: 'user_id, title' });
+                        await supabase.from('transcripts').upsert({ user_id: user.id, title: source.title, source_type: source.mediaType, source_url: urlData.publicUrl, content: result }, { onConflict: 'user_id, title' }).select().single().then(({data}) => {
+                            if(data) setSource(prev => ({...prev, id: data.id}));
+                        });
                         fetchHistory();
                     }
                 } catch (err) { 
+                    console.error(err);
                     setProcessingError(err.message); 
                 }
                 setIsProcessing(false);
             };
 
-            // RESTORED: handleTimeUpdate (The fix for the Uncaught ReferenceError)
+            // MODIFIED: Stop at Time Logic for Auto-Pause
             const handleTimeUpdate = (t) => {
                 setCurrentTime(t);
                 if (stopAtTime !== null && t >= stopAtTime) {
@@ -434,56 +515,136 @@ Output JSON only:` }];
                 }
             };
 
-            const handleTranscriptClick = (seg) => {
-                if(!seg) return;
-                setCurrentTime(seg.start);
-                setStopAtTime(seg.end); 
-                setIsPlaying(true);
-            };
-
-            const loadSession = (item) => { 
-                let content = item.content || [];
-                if (typeof content === 'string') {
-                    try { content = JSON.parse(content); } catch (e) { content = []; }
-                }
-                setTranscript(Array.isArray(content) ? content : []); 
-                setSource({ id: item.id, type: 'file', mediaType: item.source_type, url: item.source_url, title: item.title, fileData: null }); 
-                setIsPlaying(false); 
-            };
-
             const handleReAnalyze = async () => {
                 if (!source) return;
+                setReAnalysisError(null);
+                
                 let fileBlob = source.fileData;
                 if (!fileBlob && source.url) {
                     try {
-                        const res = await fetch(source.url);
-                        fileBlob = await res.blob();
-                    } catch (err) { return; }
+                        const urlParts = source.url.split('/public/media/');
+                        if (urlParts.length > 1) {
+                            const storagePath = decodeURIComponent(urlParts[1]);
+                            const { data, error } = await supabase.storage.from('media').download(storagePath);
+                            if (error) throw error;
+                            fileBlob = data;
+                        } else {
+                            const res = await fetch(source.url);
+                            if (!res.ok) throw new Error("Fetch failed");
+                            fileBlob = await res.blob();
+                        }
+                    } catch (err) {
+                        setReAnalysisError("Could not retrieve media file.");
+                        return;
+                    }
                 }
+
                 if (!fileBlob) return;
-                const indicesToFix = selectedIndices.length > 0 ? selectedIndices : (activeIndex !== -1 ? [activeIndex] : []);
+
+                const indicesToFix = selectedIndices.length > 0 
+                    ? [...selectedIndices].sort((a, b) => a - b) 
+                    : (activeIndex !== -1 ? [activeIndex] : []);
+                
                 if (indicesToFix.length === 0) return;
+
                 const startIdx = indicesToFix[0];
                 const endIdx = indicesToFix[indicesToFix.length - 1];
+                const startTime = transcript[startIdx].start;
+                const endTime = transcript[endIdx].end;
+
                 setIsReAnalyzing(true);
                 try {
-                    const newSegments = await fetchBatchReAnalysis(geminiKey, fileBlob, transcript[startIdx].start, transcript[endIdx].end, correctionHint);
+                    const newSegments = await fetchBatchReAnalysis(geminiKey, fileBlob, startTime, endTime, correctionHint);
+                    if (!Array.isArray(newSegments)) throw new Error("Invalid format");
                     setReAnalysisPreview({ startIdx, endIdx, segments: newSegments });
-                } catch (err) { setReAnalysisError(err.message); }
-                setIsReAnalyzing(false);
+                } catch (err) { 
+                    setReAnalysisError("Re-analysis failed: " + err.message);
+                } finally {
+                    setIsReAnalyzing(false);
+                }
             };
 
-            const saveVocabWord = async () => {
-                if (!analysis || !user) return;
-                const { error } = await supabase.from('user_vocabulary').insert([{ user_id: user.id, word: analysis.content, definition: analysis.meaning, example: "" }]);
-                if (!error) fetchVocabulary(user.id);
+            const confirmReAnalysis = async () => {
+                if (!reAnalysisPreview) return;
+                const { startIdx, endIdx, segments } = reAnalysisPreview;
+                const newTranscript = [...transcript];
+                newTranscript.splice(startIdx, (endIdx - startIdx + 1), ...segments);
+                setTranscript(newTranscript);
+
+                if (user && source.id) {
+                    await supabase.from('transcripts').update({ content: newTranscript }).eq('id', source.id);
+                    fetchHistory();
+                }
+
+                setReAnalysisPreview(null);
+                setCorrectionHint("");
+                setSelectedIndices([]);
+                setLastSelectedIndex(null);
+                setFixPanelOpen(false);
             };
-            const deleteVocabWord = async (id) => {
-                await supabase.from('user_vocabulary').delete().eq('id', id);
-                fetchVocabulary(user.id);
+
+            const handleShare = (item) => {
+                const shareLink = `${window.location.origin}${window.location.pathname}?share=${item.id}`;
+                const textArea = document.createElement("textarea");
+                textArea.value = shareLink;
+                textArea.style.position = "fixed";
+                textArea.style.left = "-9999px";
+                textArea.style.top = "0";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    setShareToastVisible(true);
+                    setTimeout(() => setShareToastVisible(false), 3000);
+                } catch (err) {
+                    console.error('Copy failed', err);
+                }
+                document.body.removeChild(textArea);
             };
+
+            // MODIFIED: Auto-Pause Logic
+            const handleTranscriptSeek = (index) => {
+                if (!transcript || transcript.length === 0) return;
+                const seg = transcript[index];
+                if (seg) { 
+                    setSeekTrigger(prev => prev + 1); 
+                    setCurrentTime(seg.start); 
+                    setIsPlaying(true); 
+                    setStopAtTime(seg.end); // <--- Auto-pause enabled
+                }
+            };
+
+            const handleSidebarClick = (e, idx) => {
+                let newSelected = [...selectedIndices];
+                if (e.shiftKey && lastSelectedIndex !== null) {
+                    const start = Math.min(lastSelectedIndex, idx);
+                    const end = Math.max(lastSelectedIndex, idx);
+                    const range = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+                    setSelectedIndices(range);
+                } else if (e.ctrlKey || e.metaKey) {
+                    if (newSelected.includes(idx)) {
+                        newSelected = newSelected.filter(i => i !== idx);
+                    } else {
+                        newSelected.push(idx);
+                    }
+                    setSelectedIndices(newSelected);
+                    setLastSelectedIndex(idx);
+                } else {
+                    setSelectedIndices([idx]);
+                    setLastSelectedIndex(idx);
+                    handleTranscriptSeek(idx);
+                }
+            };
+
+            const selectAllAfter = (idx) => {
+                const range = Array.from({ length: transcript.length - idx }, (_, i) => idx + i);
+                setSelectedIndices(range);
+                setFixPanelOpen(true);
+            };
+
             const triggerAnalysis = async () => {
-                if (transcriptOpen) setTranscriptOpen(false);
+                autoCollapseTranscript();
                 const sentence = transcript[activeIndex]?.text;
                 if (!sentence) return;
                 setIsAnalyzing(true);
@@ -494,6 +655,7 @@ Output JSON only:` }];
                     if (activeTab === 'Shadowing') setActiveTab('Meaning and Grammar');
                 } catch (err) { console.error(err); setIsAnalyzing(false); }
             };
+
             const startRecording = async () => {
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -506,9 +668,15 @@ Output JSON only:` }];
                     setIsRecording(true);
                 } catch (e) { console.error(e); }
             };
+
             const stopRecording = () => {
-                if(recorder) { recorder.stop(); setIsRecording(false); }
+                if (recorder) {
+                    recorder.stop();
+                    recorder.stream.getTracks().forEach(t => t.stop());
+                    setIsRecording(false);
+                }
             };
+
             const saveRecording = async () => {
                 if (!recordedBlob || !user) return;
                 setIsSavingRecord(true);
@@ -522,9 +690,19 @@ Output JSON only:` }];
                 }
                 setIsSavingRecord(false);
             };
+
             const deleteRecording = async (id) => {
                 await supabase.from('user_recordings').delete().eq('id', id);
                 fetchRecordings(user.id);
+            };
+
+            const handleAuth = async (email, password, mode) => {
+                const { error } = (mode === 'signup') 
+                    ? await supabase.auth.signUp({ email, password }) 
+                    : await supabase.auth.signInWithPassword({ email, password });
+                if (error) return error.message;
+                setIsLoginOpen(false);
+                return null;
             };
 
             const renderDictationSlots = () => {
@@ -539,9 +717,23 @@ Output JSON only:` }];
                             return (
                                 <div key={wordIdx} className="flex items-end gap-1">
                                     <div className="flex gap-1">
-                                        {[...Array(cleanWord.length)].map((_, charIdx) => (
-                                            <input key={charIdx} type="text" className="dictation-input" />
-                                        ))}
+                                        {[...Array(cleanWord.length)].map((_, charIdx) => {
+                                            const currentKey = `${wordIdx}_${charIdx}`;
+                                            const nextKey = (charIdx < cleanWord.length - 1) ? `${wordIdx}_${charIdx + 1}` : (wordIdx < tokens.length - 1) ? `${wordIdx + 1}_0` : null;
+                                            const prevKey = (charIdx > 0) ? `${wordIdx}_${charIdx - 1}` : (wordIdx > 0) ? `${wordIdx - 1}_${tokens[wordIdx-1].replace(/[.,!?;:"]/g, '').length - 1}` : null;
+                                            const isCorrect = dictationValues[currentKey]?.toLowerCase() === cleanWord[charIdx].toLowerCase();
+                                            const isIncorrect = dictationChecked && dictationValues[currentKey] && dictationValues[currentKey]?.toLowerCase() !== cleanWord[charIdx].toLowerCase();
+                                            return (
+                                                <input key={charIdx} id={`input-${currentKey}`} type="text" autoComplete="off" className={`dictation-input ${isCorrect ? 'correct' : ''} ${isIncorrect ? 'incorrect' : ''}`} value={dictationValues[currentKey] || ''} onChange={(e) => {
+                                                    const val = e.target.value.slice(-1);
+                                                    setDictationValues(p => ({ ...p, [currentKey]: val }));
+                                                    if (val && nextKey) document.getElementById(`input-${nextKey}`)?.focus();
+                                                }} onKeyDown={(e) => {
+                                                    if (e.key === 'Backspace' && !dictationValues[currentKey] && prevKey) document.getElementById(`input-${prevKey}`)?.focus();
+                                                    if (e.key === ' ') { e.preventDefault(); document.getElementById(`input-${wordIdx + 1}_0`)?.focus(); }
+                                                }} />
+                                            );
+                                        })}
                                     </div>
                                     {punctuation && <span className="text-gray-400 text-xl font-bold pb-1">{punctuation}</span>}
                                 </div>
@@ -551,12 +743,65 @@ Output JSON only:` }];
                 );
             };
 
+            const loadSession = (item) => { 
+                let content = item.content || [];
+                if (typeof content === 'string') {
+                    try { content = JSON.parse(content); } catch (e) { content = []; }
+                }
+                setTranscript(Array.isArray(content) ? content : []); 
+                setSource({ id: item.id, type: 'file', mediaType: item.source_type, url: item.source_url, title: item.title, fileData: null }); 
+                setIsPlaying(false); 
+            };
+
             return (
                 <div className="h-full flex flex-col font-sans text-gray-900 bg-white fade-in overflow-hidden relative">
                     <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} onLogin={handleAuth} />
                     <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} apiKey={geminiKey} onSave={saveSettings} />
                     <VocabularyModal isOpen={isVocabOpen} onClose={() => setIsVocabOpen(false)} words={vocabulary} onDelete={deleteVocabWord} />
-                    <ConfirmModal isOpen={isReplaceConfirmOpen} title="Replace Session?" message="Exists. Replace?" onConfirm={() => { if(pendingFile) processFileUpload(pendingFile); setIsReplaceConfirmOpen(false); }} onClose={() => setIsReplaceConfirmOpen(false)} />
+                    <ConfirmModal isOpen={isReplaceConfirmOpen} title="Replace Session?" message="A session already exists for this file. Would you like to replace it?" onConfirm={() => { if (pendingFile) processFileUpload(pendingFile); setIsReplaceConfirmOpen(false); }} onCancel={() => setIsReplaceConfirmOpen(false)} />
+
+                    {shareToastVisible && (
+                        <div className="share-toast px-6 py-3 bg-emerald-600 text-white rounded-full shadow-2xl font-bold flex items-center gap-2">
+                            <Check size={18} /> Link copied to clipboard!
+                        </div>
+                    )}
+
+                    {/* Fix Transcript Popup */}
+                    <div className={`fixed inset-y-0 left-0 z-40 w-80 bg-white border-r shadow-2xl transition-transform duration-300 ease-in-out transform ${fixPanelOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+                        <div className="h-full flex flex-col">
+                            <div className="p-4 border-b bg-red-50 flex justify-between items-center">
+                                <div className="flex items-center gap-2 font-bold text-red-900"><AlertTriangle size={18} /> Fix Transcript</div>
+                                <button onClick={() => { setFixPanelOpen(false); setReAnalysisPreview(null); }} className="p-1 hover:bg-red-100 rounded-full text-red-400"><X size={20} /></button>
+                            </div>
+                            <div className="flex-1 p-6 space-y-6 overflow-y-auto custom-scrollbar">
+                                {!reAnalysisPreview ? (
+                                    <div className="space-y-4">
+                                        <h4 className="text-sm font-bold text-gray-600">{selectedIndices.length > 0 ? `${selectedIndices.length} segments selected` : 'No segments selected'}</h4>
+                                        <textarea placeholder="Enter correction hints here..." className="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-red-500 min-h-[150px]" value={correctionHint} onChange={(e) => setCorrectionHint(e.target.value)} />
+                                        {reAnalysisError && <div className="p-3 bg-red-50 text-red-600 text-[10px] rounded-xl font-medium border border-red-100">{reAnalysisError}</div>}
+                                        <button onClick={handleReAnalyze} disabled={isReAnalyzing || (selectedIndices.length === 0 && activeIndex === -1)} className="w-full py-4 bg-red-600 text-white font-bold rounded-2xl flex items-center justify-center gap-2 hover:bg-red-700 transition-all disabled:opacity-50">{isReAnalyzing ? <Spinner /> : <><Wand2 size={16} /> Re-analyze</>}</button>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        <h4 className="text-sm font-bold text-gray-600">Review Changes</h4>
+                                        <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                                            {reAnalysisPreview.segments.map((seg, i) => (
+                                                <div key={i} className="p-2 bg-emerald-50 rounded-lg border border-emerald-100 text-[10px]">
+                                                    <div className="font-bold mb-1">{formatTime(seg.start)} - {formatTime(seg.end)}</div>
+                                                    <div>{seg.text}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="p-3 bg-blue-50 text-blue-800 text-[10px] rounded-lg">Confirming will permanently update the database record.</div>
+                                        <div className="flex gap-2 pt-4">
+                                            <button onClick={() => setReAnalysisPreview(null)} className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl text-xs">Back</button>
+                                            <button onClick={confirmReAnalysis} className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl text-xs shadow-md">Confirm & Update</button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
 
                     <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center z-20 shadow-none">
                         <div className="flex items-center gap-3"><div className="bg-black p-2 rounded-lg"><Sparkles className="text-white w-5 h-5" /></div><h1 className="text-xl font-bold text-black tracking-tight">LingoMate <span className="text-xs text-white bg-black px-1.5 ml-1 rounded-md italic font-normal">Listening Practice</span></h1></div>
@@ -571,10 +816,15 @@ Output JSON only:` }];
                         <aside className={`${sidebarOpen ? 'w-80 border-r' : 'w-0'} bg-white transition-all duration-300 overflow-hidden flex flex-col z-10 relative`}>
                             <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[320px]"><h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><History className="w-4 h-4" /> Library</h2><button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronLeft className="w-4 h-4" /></button></div>
                             <div className="flex-1 overflow-y-auto p-3 space-y-2 min-w-[320px] custom-scrollbar">
+                                {history.length === 0 && <div className="text-center p-8 opacity-20"><Database className="w-8 h-8 mx-auto mb-2" /><p className="text-xs font-semibold">No files saved</p></div>}
                                 {history.map(item => (
                                     <div key={item.id} onClick={() => loadSession(item)} className="p-3 border border-gray-100 hover:border-black rounded-xl cursor-pointer group relative transition-all bg-white shadow-sm hover:shadow-md">
                                         <h3 className="font-bold text-xs truncate text-gray-800 pr-12">{item.title}</h3>
                                         <div className="flex justify-between items-center mt-2 opacity-50 text-[10px] font-medium"><span>{item.source_type}</span><span>{new Date(item.created_at).toLocaleDateString()}</span></div>
+                                        <div className="absolute top-2.5 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button onClick={(e) => { e.stopPropagation(); handleShare(item); }} title="Share session" className="p-1 text-gray-400 transition-colors"><Share2 size={14} /></button>
+                                            <button onClick={(e) => { e.stopPropagation(); supabase.from('transcripts').delete().eq('id', item.id).then(() => fetchHistory()); }} title="Delete session" className="p-1 text-gray-400 transition-colors"><Trash2 size={14} /></button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -642,8 +892,8 @@ Output JSON only:` }];
                                                 <div className="p-6 min-h-[400px]">
                                                     {activeTab === 'Shadowing' && (
                                                         <div className="space-y-8 fade-in">
-                                                            <div className="flex flex-col space-y-4"><div className="flex items-center justify-between px-1"><label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2"><Layers size={12} /> Practice chunk size</label><select value={chunkSize} onChange={(e) => setChunkSize(e.target.value)} className="text-xs font-bold border-none bg-gray-50 rounded-lg px-2 py-1 outline-none"><option value="single">Single sentence</option><option value="5-8">5-8 seconds</option></select></div>
-                                                                <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptClick(transcript[Math.max(0, activeIndex - 1)])} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptClick(transcript[activeIndex])} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptClick(transcript[Math.min(transcript.length - 1, activeIndex + 1)])} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
+                                                            <div className="flex flex-col space-y-4"><div className="flex items-center justify-between px-1"><label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2"><Layers size={12} /> Practice chunk size</label><select value={chunkSize} onChange={(e) => setChunkSize(e.target.value)} className="text-xs font-bold border-none bg-gray-50 rounded-lg px-2 py-1 outline-none"><option value="single">Single sentence</option><option value="5-8">5-8 seconds</option><option value="15-18">15-18 seconds</option><option value="30-35">30-35 seconds</option><option value="60-65">60-65 seconds</option></select></div>
+                                                                <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptSeek(activeIndex - 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptSeek(activeIndex + 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
                                                             </div>
                                                             <div className="p-6 bg-gray-50 rounded-3xl border border-gray-100 space-y-4">
                                                                 <div className="flex items-center justify-between"><h4 className="text-sm font-bold text-gray-600 flex items-center gap-2"><Mic size={16} /> Voice record</h4>{recordingsList.length >= 30 && <span className="text-[9px] font-bold text-red-400 uppercase tracking-widest">Limit : 30</span>}</div>
@@ -654,12 +904,14 @@ Output JSON only:` }];
                                                     )}
                                                     {activeTab === 'Dictation' && (
                                                         <div className="h-full flex flex-col space-y-6 fade-in">
+                                                            <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptSeek(activeIndex - 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptSeek(activeIndex + 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
                                                             <div className="p-10 bg-gray-50 rounded-[2.5rem] border border-gray-100 min-h-[300px] flex flex-col items-center justify-center overflow-y-auto custom-scrollbar gap-8">{showDictationContent && <div className="w-full text-center px-6 py-4 bg-white/50 rounded-2xl border border-gray-200 fade-in"><p className="text-lg font-semibold text-gray-900 leading-relaxed">{transcript[activeIndex]?.text}</p></div>}{renderDictationSlots()}</div>
                                                             <div className="flex flex-wrap justify-center items-center gap-4 px-2"><button onClick={() => { setDictationChecked(true); }} className="px-8 py-3 bg-black text-white text-sm font-bold rounded-2xl shadow-md">Check spelling</button><button onClick={() => setShowDictationContent(!showDictationContent)} className="px-8 py-3 bg-white border border-gray-200 text-gray-700 text-sm font-bold rounded-2xl hover:bg-gray-50 transition-all flex items-center gap-2"><Eye size={16} /> {showDictationContent ? "Hide content" : "Show content"}</button>{showDictationContent && <button onClick={triggerAnalysis} disabled={isAnalyzing} className="px-8 py-3 bg-blue-600 text-white text-sm font-bold rounded-2xl shadow-md hover:bg-blue-700 transition-all flex items-center gap-2">{isAnalyzing ? <Spinner /> : <Book size={16} />} Analyze</button>}</div>
                                                         </div>
                                                     )}
                                                     {activeTab === 'Translation' && (
                                                         <div className="h-full flex flex-col space-y-6 fade-in">
+                                                            <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptSeek(activeIndex - 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptSeek(activeIndex + 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
                                                             <div className="flex-1 flex flex-col gap-4">
                                                                 <label className="text-xs font-bold text-gray-400 uppercase px-1 tracking-widest">Source sentence</label>
                                                                 <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100"><p className="text-lg font-semibold text-gray-900 leading-relaxed italic">{transcript[activeIndex]?.text || "Select a segment to practice"}</p></div>
@@ -698,10 +950,9 @@ Output JSON only:` }];
                             </div>
                             <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-[450px] custom-scrollbar pb-24 bg-gray-50/30" ref={transcriptRef}>
                                 {transcript.map((s, idx) => {
-                                    const isSelected = selectedIndices.includes(idx);
                                     const isActive = activeIndex === idx;
                                     return (
-                                        <div key={idx} onClick={(e) => handleSidebarClick(e, idx)} className={`group p-4 rounded-xl cursor-pointer transition-all border-2 flex gap-3 relative ${isActive ? 'bg-black border-black text-white shadow-md' : 'bg-white border-transparent hover:border-gray-100 text-gray-500 shadow-sm'}`}>
+                                        <div key={idx} onClick={() => handleTranscriptClick(s)} className={`group p-4 rounded-xl cursor-pointer transition-all border-2 flex gap-3 relative ${isActive ? 'bg-black border-black text-white shadow-md' : 'bg-white border-transparent hover:border-gray-100 text-gray-500 shadow-sm'}`}>
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex justify-between items-center mb-1 text-[9px] font-bold uppercase tracking-wider opacity-60"><span>{s.speaker || 'Speaker'}</span><span>{formatTime(s.start)} - {formatTime(s.end)}</span></div>
                                                 <p className="text-sm font-medium leading-relaxed pr-8">{s.text}</p>
