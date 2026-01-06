@@ -110,7 +110,6 @@
                     start = previousEnd;
                 }
                 
-                // Use AI end time with strict chaining but enforce tiny minimal duration
                 if (end < start + 0.2) {
                     end = start + 0.2; 
                 }
@@ -142,11 +141,9 @@
         const processTranscription = async (apiKey, fileObject = null, contextText = "", totalDuration = 0) => {
             const effectiveKey = apiKey || DEFAULT_API_KEY;
             let parts = [];
-            const durationStr = totalDuration ? `${totalDuration.toFixed(2)}` : "unknown";
-
+            
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                // PROMPT: UPDATED LINGUISTIC RULES
                 parts = [filePart, { text: `You are a precision audio alignment engine.
 I will provide an audio file.
 Your task: Transcribe it into **INDIVIDUAL SENTENCES**.
@@ -312,7 +309,7 @@ Output JSON only:` }];
                             <input type="password" required className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-black transition-all" value={password} onChange={e => setPassword(e.target.value)} />
                         </div>
                         <button type="submit" disabled={loading} className="w-full bg-black text-white py-4 font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-gray-800 transition-all shadow-md">
-                            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : mode === 'login' ? "Login" : "Register"}
+                            {loading ? <Spinner /> : mode === 'login' ? "Login" : "Register"}
                         </button>
                         <p className="text-center text-sm text-gray-500 pt-2">
                             {mode === 'login' ? "Don't have an account?" : "Already have an account?"}
@@ -1003,6 +1000,7 @@ Output JSON only:` }];
                                                     )}
                                                     {activeTab === 'Translation' && (
                                                         <div className="h-full flex flex-col space-y-6 fade-in">
+                                                            <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptSeek(Math.max(0, activeIndex - 1))} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptSeek(Math.min(transcript.length - 1, activeIndex + 1))} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
                                                             <div className="flex-1 flex flex-col gap-4">
                                                                 <label className="text-xs font-bold text-gray-400 uppercase px-1 tracking-widest">Source sentence</label>
                                                                 <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100"><p className="text-lg font-semibold text-gray-900 leading-relaxed italic">{transcript[activeIndex]?.text || "Select a segment to practice"}</p></div>
@@ -1041,6 +1039,7 @@ Output JSON only:` }];
                             </div>
                             <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-[450px] custom-scrollbar pb-24 bg-gray-50/30" ref={transcriptRef}>
                                 {transcript.map((s, idx) => {
+                                    const isSelected = selectedIndices.includes(idx);
                                     const isActive = activeIndex === idx;
                                     return (
                                         <div key={idx} onClick={(e) => handleTranscriptClick(s)} className={`group p-4 rounded-xl cursor-pointer transition-all border-2 flex gap-3 relative ${isActive ? 'bg-black border-black text-white shadow-md' : 'bg-white border-transparent hover:border-gray-100 text-gray-500 shadow-sm'}`}>
