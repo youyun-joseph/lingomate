@@ -668,7 +668,6 @@ Output JSON:` }];
                 setIsSavingManual(true);
 
                 try {
-                    // Deep copy to prevent mutation issues
                     const newTranscript = JSON.parse(JSON.stringify(transcript));
                     
                     const newEndVal = parseFloat(manualEndTime);
@@ -678,58 +677,56 @@ Output JSON:` }];
                         return;
                     }
 
-                    // Enforce start < end constraint
                     const currentStart = newTranscript[editingIndex].start;
+                    
+                    // Update current item's end
                     if (newEndVal <= currentStart) {
-                         // Fallback: min 0.1s duration
                          newTranscript[editingIndex].end = currentStart + 0.1;
                     } else {
                          newTranscript[editingIndex].end = newEndVal;
                     }
 
-                    // Calculate Diff based on what was ACTUALLY changed in the new array vs the user input
-                    // We need the original end from the original transcript to calculate diff
-                    const originalEnd = transcript[editingIndex].end;
-                    const diff = newTranscript[editingIndex].end - originalEnd;
-
-                    // 1. Update Start of Next Segment to match current End
-                    if (editingIndex + 1 < newTranscript.length) {
-                        newTranscript[editingIndex + 1].start = newTranscript[editingIndex].end;
-                    }
-
-                    // 2. Shift Following if requested
                     if (shiftFollowing) {
+                        // RECALCULATE CHAIN (Preserve durations, don't just add diff)
+                        // This prevents floating point drift and "collapsed chain" bugs
+                        let runningStart = newTranscript[editingIndex].end;
+
                         for (let i = editingIndex + 1; i < newTranscript.length; i++) {
-                            // Apply Diff to End
-                            newTranscript[i].end = newTranscript[i].end + diff;
+                            const originalDuration = transcript[i].end - transcript[i].start;
+                            // Ensure duration is positive sanity check
+                            const safeDuration = Math.max(0.1, originalDuration);
                             
-                            // Link next start to this end
-                            if (i + 1 < newTranscript.length) {
-                                newTranscript[i + 1].start = newTranscript[i].end;
-                            }
+                            newTranscript[i].start = runningStart;
+                            newTranscript[i].end = runningStart + safeDuration;
+                            
+                            runningStart = newTranscript[i].end;
                         }
                     } else {
-                        // If NOT shifting, we must ensure we didn't cause overlap with next segment's end
-                        // i.e. if we extended Current, Next Start moves forward. 
-                        // If Next Start > Next End, we must push Next End.
+                        // Standard link: Just ensure next start touches this end
                         if (editingIndex + 1 < newTranscript.length) {
-                             if (newTranscript[editingIndex + 1].start >= newTranscript[editingIndex + 1].end) {
-                                  newTranscript[editingIndex + 1].end = newTranscript[editingIndex + 1].start + 0.1; 
+                             newTranscript[editingIndex + 1].start = newTranscript[editingIndex].end;
+                             // Prevent negative duration in next segment
+                             if (newTranscript[editingIndex + 1].end <= newTranscript[editingIndex + 1].start) {
+                                  newTranscript[editingIndex + 1].end = newTranscript[editingIndex + 1].start + 0.1;
                              }
                         }
                     }
 
-                    // Optimistic Update
+                    // Optimistic UI Update
                     setTranscript(newTranscript);
                     
                     if (user && source.id) {
-                        const { error } = await supabase.from('transcripts').update({ content: newTranscript }).eq('id', source.id);
-                        if (!error) {
-                            // STRICT RE-FETCH: Guarantee that UI matches DB
-                            const { data } = await supabase.from('transcripts').select('content').eq('id', source.id).single();
-                            if (data && data.content) {
-                                setTranscript(Array.isArray(data.content) ? data.content : newTranscript);
-                            }
+                        // DB UPDATE + SELECT in one go (Critical Fix)
+                        const { data, error } = await supabase
+                            .from('transcripts')
+                            .update({ content: newTranscript })
+                            .eq('id', source.id)
+                            .select()
+                            .single();
+                            
+                        if (!error && data && data.content) {
+                            // Enforce DB state on UI to ensure sync
+                            setTranscript(Array.isArray(data.content) ? data.content : newTranscript);
                             fetchHistory();
                         }
                     }
