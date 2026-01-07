@@ -32,18 +32,6 @@
         .dictation-input.correct { color: #059669; border-bottom-color: #059669; }
         .dictation-input.incorrect { color: #dc2626; border-bottom-color: #dc2626; }
 
-        .floating-add-btn {
-            position: fixed;
-            z-index: 1000;
-            transform: translate(-50%, -100%);
-            margin-top: -12px;
-            animation: popIn 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        }
-        @keyframes popIn {
-            from { opacity: 0; transform: translate(-50%, -100%) scale(0.8); }
-            to { opacity: 1; transform: translate(-50%, -100%) scale(1); }
-        }
-
         .share-toast {
             position: fixed;
             bottom: 24px;
@@ -381,7 +369,6 @@ Output JSON:` }];
             );
         };
 
-        // --- UPDATED TIME FORMATTER (MILLISECONDS) ---
         const formatTime = (s) => {
             if (s === undefined || s === null) return "0:00.000";
             const mins = Math.floor(s / 60);
@@ -445,8 +432,9 @@ Output JSON:` }];
 
             // Manual Edit State
             const [editingIndex, setEditingIndex] = useState(null);
-            const [manualEndTime, setManualEndTime] = useState(0);
+            const [manualEndTime, setManualEndTime] = useState("");
             const [shiftFollowing, setShiftFollowing] = useState(false);
+            const [isSavingManual, setIsSavingManual] = useState(false);
 
             const [shareToastVisible, setShareToastVisible] = useState(false);
             const [selectionState, setSelectionState] = useState({ visible: false, x: 0, y: 0, text: '' });
@@ -663,14 +651,13 @@ Output JSON:` }];
                 setReAnalysisPreview(null); setCorrectionHint(""); setSelectedIndices([]); setLastSelectedIndex(null); setFixPanelOpen(false);
             };
 
-            // --- MANUAL EDIT LOGIC ---
+            // --- FIXED MANUAL EDIT LOGIC ---
             const handleManualEditOpen = (e, index) => {
                 e.stopPropagation();
                 setEditingIndex(index);
-                setManualEndTime(transcript[index].end);
+                setManualEndTime(transcript[index].end.toString());
                 setFixPanelMode('manual');
                 setFixPanelOpen(true);
-                // Pause playback to focus on edit
                 setIsPlaying(false);
                 setCurrentTime(transcript[index].start);
                 setSeekTrigger(prev => prev + 1);
@@ -678,62 +665,86 @@ Output JSON:` }];
 
             const confirmManualEdit = async () => {
                 if (editingIndex === null) return;
-                
-                let newTranscript = [...transcript];
-                const oldEnd = newTranscript[editingIndex].end;
-                const newEnd = Number(manualEndTime);
-                const diff = newEnd - oldEnd;
+                setIsSavingManual(true);
 
-                // 1. Update Current End
-                newTranscript[editingIndex].end = newEnd;
+                try {
+                    // Deep copy to prevent mutation issues
+                    const newTranscript = JSON.parse(JSON.stringify(transcript));
+                    
+                    const newEndVal = parseFloat(manualEndTime);
+                    if (isNaN(newEndVal)) {
+                        alert("Invalid Time format");
+                        setIsSavingManual(false);
+                        return;
+                    }
 
-                // 2. Adjust Chain
-                if (editingIndex + 1 < newTranscript.length) {
-                    newTranscript[editingIndex + 1].start = newEnd;
-                }
+                    // Enforce start < end constraint
+                    const currentStart = newTranscript[editingIndex].start;
+                    if (newEndVal <= currentStart) {
+                         // Fallback: min 0.1s duration
+                         newTranscript[editingIndex].end = currentStart + 0.1;
+                    } else {
+                         newTranscript[editingIndex].end = newEndVal;
+                    }
 
-                // 3. Shift Following if requested
-                if (shiftFollowing) {
-                    for (let i = editingIndex + 1; i < newTranscript.length; i++) {
-                        // Current logic: next start is already set to newEnd above.
-                        // We need to shift the END of the next one by diff, and so on.
-                        newTranscript[i].end = newTranscript[i].end + diff;
-                        // Update start of i+1 based on i.end
-                        if (i + 1 < newTranscript.length) {
-                            newTranscript[i + 1].start = newTranscript[i].end;
+                    // Calculate Diff based on what was ACTUALLY changed in the new array vs the user input
+                    // We need the original end from the original transcript to calculate diff
+                    const originalEnd = transcript[editingIndex].end;
+                    const diff = newTranscript[editingIndex].end - originalEnd;
+
+                    // 1. Update Start of Next Segment to match current End
+                    if (editingIndex + 1 < newTranscript.length) {
+                        newTranscript[editingIndex + 1].start = newTranscript[editingIndex].end;
+                    }
+
+                    // 2. Shift Following if requested
+                    if (shiftFollowing) {
+                        for (let i = editingIndex + 1; i < newTranscript.length; i++) {
+                            // Apply Diff to End
+                            newTranscript[i].end = newTranscript[i].end + diff;
+                            
+                            // Link next start to this end
+                            if (i + 1 < newTranscript.length) {
+                                newTranscript[i + 1].start = newTranscript[i].end;
+                            }
+                        }
+                    } else {
+                        // If NOT shifting, we must ensure we didn't cause overlap with next segment's end
+                        // i.e. if we extended Current, Next Start moves forward. 
+                        // If Next Start > Next End, we must push Next End.
+                        if (editingIndex + 1 < newTranscript.length) {
+                             if (newTranscript[editingIndex + 1].start >= newTranscript[editingIndex + 1].end) {
+                                  newTranscript[editingIndex + 1].end = newTranscript[editingIndex + 1].start + 0.1; 
+                             }
                         }
                     }
-                }
 
-                // Sanity check for negative durations or overlaps if not shifting
-                if (!shiftFollowing && editingIndex + 1 < newTranscript.length) {
-                    if (newTranscript[editingIndex + 1].start >= newTranscript[editingIndex + 1].end) {
-                         // Simple fix: bump the next end to be start + 0.1
-                         newTranscript[editingIndex + 1].end = newTranscript[editingIndex + 1].start + 0.1;
+                    setTranscript(newTranscript);
+                    
+                    if (user && source.id) {
+                        await supabase.from('transcripts').update({ content: newTranscript }).eq('id', source.id);
+                        fetchHistory();
                     }
+                    
+                    setFixPanelOpen(false);
+                    setEditingIndex(null);
+                } catch (e) {
+                    console.error("Save failed", e);
+                    alert("Failed to save changes. Please try again.");
+                } finally {
+                    setIsSavingManual(false);
                 }
-
-                setTranscript(newTranscript);
-                
-                // Save to DB
-                if (user && source.id) {
-                    await supabase.from('transcripts').update({ content: newTranscript }).eq('id', source.id);
-                    fetchHistory();
-                }
-
-                setFixPanelOpen(false);
-                setEditingIndex(null);
             };
 
             const playManualRange = () => {
                 if (editingIndex === null) return;
                 const start = transcript[editingIndex].start;
+                const endVal = parseFloat(manualEndTime) || (start + 1);
                 setCurrentTime(start);
                 setSeekTrigger(prev => prev + 1);
                 setIsPlaying(true);
-                setStopAtTime(manualEndTime);
+                setStopAtTime(endVal);
             };
-
 
             const handleShare = (item) => {
                 const shareLink = `${window.location.origin}${window.location.pathname}?share=${item.id}`;
@@ -962,11 +973,17 @@ Output JSON:` }];
                                         <div className="space-y-2">
                                             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2"><Clock size={12}/> End Time (Sec)</label>
                                             <div className="flex items-center gap-2">
-                                                <button onClick={() => setManualEndTime(p => Math.max(transcript[editingIndex].start + 0.1, Number(p) - 0.1))} className="p-3 bg-gray-100 hover:bg-gray-200 rounded-xl font-bold">-</button>
-                                                <input type="number" step="0.01" className="flex-1 px-4 py-3 bg-white border border-indigo-100 focus:border-indigo-500 rounded-xl text-lg font-mono text-center font-bold outline-none shadow-sm" value={Number(manualEndTime).toFixed(3)} onChange={(e) => setManualEndTime(Number(e.target.value))} />
-                                                <button onClick={() => setManualEndTime(p => Number(p) + 0.1)} className="p-3 bg-gray-100 hover:bg-gray-200 rounded-xl font-bold">+</button>
+                                                <button onClick={() => setManualEndTime(p => (parseFloat(p) - 0.1).toFixed(3))} className="p-3 bg-gray-100 hover:bg-gray-200 rounded-xl font-bold">-</button>
+                                                <input 
+                                                    type="number" 
+                                                    step="0.01" 
+                                                    className="flex-1 px-4 py-3 bg-white border border-indigo-100 focus:border-indigo-500 rounded-xl text-lg font-mono text-center font-bold outline-none shadow-sm" 
+                                                    value={manualEndTime} 
+                                                    onChange={(e) => setManualEndTime(e.target.value)} 
+                                                />
+                                                <button onClick={() => setManualEndTime(p => (parseFloat(p) + 0.1).toFixed(3))} className="p-3 bg-gray-100 hover:bg-gray-200 rounded-xl font-bold">+</button>
                                             </div>
-                                            <p className="text-center text-xs font-mono text-indigo-600">{formatTime(manualEndTime)}</p>
+                                            <p className="text-center text-xs font-mono text-indigo-600">{formatTime(parseFloat(manualEndTime) || 0)}</p>
                                         </div>
 
                                         <div className="flex items-center gap-3 p-3 bg-yellow-50 rounded-xl border border-yellow-100">
@@ -978,7 +995,9 @@ Output JSON:` }];
 
                                         <div className="pt-4 border-t border-gray-100 flex gap-3">
                                             <button onClick={() => setFixPanelOpen(false)} className="flex-1 py-3 bg-white border border-gray-200 text-gray-600 font-bold rounded-xl hover:bg-gray-50 text-xs">Cancel</button>
-                                            <button onClick={confirmManualEdit} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg text-xs">Save & Update</button>
+                                            <button onClick={confirmManualEdit} disabled={isSavingManual} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg text-xs flex items-center justify-center gap-2">
+                                                {isSavingManual ? <Spinner /> : "Save & Update"}
+                                            </button>
                                         </div>
                                     </div>
                                 )}
