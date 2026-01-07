@@ -396,7 +396,10 @@ Output JSON:` }];
             const [currentTime, setCurrentTime] = useState(0);
             const [seekTrigger, setSeekTrigger] = useState(0);
             const [loopRange, setLoopRange] = useState(null);
-            const [stopAtTime, setStopAtTime] = useState(null);
+            
+            // --- FIX: Use useRef for Stop Time to prevent stale closure issues in audio loop ---
+            const stopAtTimeRef = useRef(null); 
+            
             const [history, setHistory] = useState([]);
             const [vocabulary, setVocabulary] = useState([]);
             const [isProcessing, setIsProcessing] = useState(false);
@@ -595,9 +598,10 @@ Output JSON:` }];
 
             const handleTimeUpdate = (t) => {
                 setCurrentTime(t);
-                if (stopAtTime !== null && t >= stopAtTime) {
+                // FIX: Use REF.current to always get the freshest stop time, avoiding stale closures
+                if (stopAtTimeRef.current !== null && t >= stopAtTimeRef.current) {
                     setIsPlaying(false);
-                    setStopAtTime(null);
+                    stopAtTimeRef.current = null;
                 }
                 if (loopRange && isPlaying && t >= loopRange.end) {
                     setSeekTrigger(prev => prev + 1);
@@ -748,7 +752,7 @@ Output JSON:` }];
                 setCurrentTime(start);
                 setSeekTrigger(prev => prev + 1);
                 setIsPlaying(true);
-                setStopAtTime(endVal);
+                stopAtTimeRef.current = endVal; // FIX: Update Ref
             };
 
             const handleShare = (item) => {
@@ -766,7 +770,7 @@ Output JSON:` }];
                     setSeekTrigger(prev => prev + 1); 
                     setCurrentTime(seg.start); 
                     setIsPlaying(true); 
-                    setStopAtTime(seg.end); 
+                    stopAtTimeRef.current = seg.end; // FIX: Update Ref directly
                 }
             };
 
@@ -1074,7 +1078,7 @@ Output JSON:` }];
                                             
                                             <div className="bg-white border border-gray-100 p-4 rounded-2xl shadow-sm flex items-center justify-between px-6 transition-all">
                                                 <div className="flex items-center gap-4">
-                                                    <button onClick={() => { setIsPlaying(!isPlaying); setStopAtTime(null); }} className="w-10 h-10 bg-black text-white flex items-center justify-center rounded-full hover:scale-105 active:scale-95 transition-all">
+                                                    <button onClick={() => { setIsPlaying(!isPlaying); stopAtTimeRef.current = null; }} className="w-10 h-10 bg-black text-white flex items-center justify-center rounded-full hover:scale-105 active:scale-95 transition-all">
                                                         {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
                                                     </button>
                                                     <div className="font-mono text-xs font-bold text-gray-500 tabular-nums bg-gray-50 px-3 py-1 rounded-md border border-gray-100 min-w-[80px] text-center">
