@@ -257,15 +257,16 @@
             
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                parts = [filePart, { text: `You are a professional transcriber tool. 
-I will provide an audio or video file. 
+                parts = [filePart, { text: `I will provide an audio or video file. 
 Your task is to transcribe it into English and provide precise timestamps for the start and end of every sentence.
 
 STRICT REQUIREMENTS:
 1. Output strictly a VALID JSON array of objects.
 2. Format: [ { "text": "string", "start": number, "end": number } ]
-3. Do not split sentences on abbreviations (e.g. Mr., Dr.).
-4. Transcription must be verbatim.
+3. GRANULARITY: Each object must represent exactly ONE sentence. Never group multiple sentences into a single timestamp.
+4. ACCURACY: The 'end' time must be when the sentence finishes.
+5. Do not split sentences on abbreviations (e.g. Mr., Dr.).
+6. Transcription must be verbatim.
                 
 Output JSON:` }];
             }
