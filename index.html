@@ -230,11 +230,6 @@
 
                 previousEnd = end;
 
-                if (totalDuration > 0 && end > totalDuration) {
-                    end = totalDuration;
-                    previousEnd = totalDuration;
-                }
-
                 return { start, end, text: seg.text, speaker: seg.speaker || "Speaker" };
             }).filter(Boolean);
         };
