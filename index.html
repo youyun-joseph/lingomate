@@ -719,11 +719,19 @@ Output JSON:` }];
                         }
                     }
 
+                    // Optimistic Update
                     setTranscript(newTranscript);
                     
                     if (user && source.id) {
-                        await supabase.from('transcripts').update({ content: newTranscript }).eq('id', source.id);
-                        fetchHistory();
+                        const { error } = await supabase.from('transcripts').update({ content: newTranscript }).eq('id', source.id);
+                        if (!error) {
+                            // STRICT RE-FETCH: Guarantee that UI matches DB
+                            const { data } = await supabase.from('transcripts').select('content').eq('id', source.id).single();
+                            if (data && data.content) {
+                                setTranscript(Array.isArray(data.content) ? data.content : newTranscript);
+                            }
+                            fetchHistory();
+                        }
                     }
                     
                     setFixPanelOpen(false);
