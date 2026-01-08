@@ -209,29 +209,42 @@
             return { inlineData: { data: base64, mimeType: file.type || 'application/octet-stream' } };
         };
 
+        // --- UPDATED: SEAMLESS LINKING LOGIC (Next-Start determines Current-End) ---
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
             
+            // 1. Sort by the AI's detected start time (Trusting the "Attack")
             const sorted = rawSegments.sort((a, b) => a.start - b.start);
-            let previousEnd = 0.0;
 
             return sorted.map((seg, index) => {
-                let start = Number(seg.start);
-                let end = Number(seg.end);
+                // 2. Define Start Time
+                // If it's the first item, force it to 0.0 to catch any initial breath/silence
+                let start = (index === 0) ? 0.0 : Number(seg.start);
 
-                if (index === 0) {
-                    start = 0.0;
-                } else {
-                    start = previousEnd;
-                }
+                // 3. Define End Time
+                let end;
                 
-                // Keep AI end time but ensure it doesn't overlap backwards
-                if (end <= start) end = start + 0.5;
+                // If there is a "Next Segment", this segment ends exactly when the next one starts.
+                if (index < sorted.length - 1) {
+                    end = Number(sorted[index + 1].start);
+                } else {
+                    // If this is the last segment, it ends at the file duration
+                    end = totalDuration > 0 ? totalDuration : Number(seg.end); 
+                }
 
-                previousEnd = end;
+                // 4. Sanity Check: Prevent negative duration errors
+                // If the AI gave a start time that is AFTER the next start (impossible), fix it.
+                if (end <= start) {
+                    end = start + 0.5; // Fallback minimal duration
+                }
 
-                return { start, end, text: seg.text, speaker: seg.speaker || "Speaker" };
-            }).filter(Boolean);
+                return { 
+                    start, 
+                    end, 
+                    text: seg.text.trim(), 
+                    speaker: seg.speaker || "Speaker" 
+                };
+            });
         };
 
         const callGemini = async (apiKey, model, body) => {
@@ -250,20 +263,20 @@
             const effectiveKey = apiKey || DEFAULT_API_KEY;
             let parts = [];
             
+            // --- UPDATED: PROMPT FOCUSES ON START TIME ACCURACY ---
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
-                parts = [filePart, { text: `I will provide an audio or video file. 
-Your task is to transcribe it into English and provide precise timestamps for the start and end of every sentence.
+                parts = [filePart, { text: `I will provide an audio file. 
+Your task is to transcribe it into English.
 
-STRICT REQUIREMENTS:
-1. Output strictly a VALID JSON array of objects.
-2. Format: [ { "text": "string", "start": number, "end": number } ]
-3. GRANULARITY: Each object must represent exactly ONE sentence. Never group multiple sentences into a single timestamp.
-4. ACCURACY: The 'end' time must be when the sentence finishes.
-5. Do not split sentences on abbreviations (e.g. Mr., Dr.).
-6. Transcription must be verbatim.
-                
-Output JSON:` }];
+CRITICAL TIMING INSTRUCTIONS:
+1. Identify the EXACT start time of every sentence.
+2. The accuracy of the "start" timestamp is the most important factor.
+3. Transcribe verbatim.
+
+Output strictly a VALID JSON array:
+[ { "text": "Sentence one.", "start": 0.0, "end": 2.5 }, ... ]
+` }];
             }
 
             let rawText = "";
