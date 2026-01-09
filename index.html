@@ -209,7 +209,7 @@
             return { inlineData: { data: base64, mimeType: file.type || 'application/octet-stream' } };
         };
 
-        // --- UPDATED: SEAMLESS LINKING LOGIC (Next-Start determines Current-End) ---
+        // --- SEAMLESS LINKING LOGIC ---
         const sanitizeTranscript = (rawSegments, totalDuration) => {
             if (!Array.isArray(rawSegments) || rawSegments.length === 0) return [];
             
@@ -218,24 +218,19 @@
 
             return sorted.map((seg, index) => {
                 // 2. Define Start Time
-                // If it's the first item, force it to 0.0 to catch any initial breath/silence
                 let start = (index === 0) ? 0.0 : Number(seg.start);
 
                 // 3. Define End Time
                 let end;
-                
-                // If there is a "Next Segment", this segment ends exactly when the next one starts.
                 if (index < sorted.length - 1) {
                     end = Number(sorted[index + 1].start);
                 } else {
-                    // If this is the last segment, it ends at the file duration
                     end = totalDuration > 0 ? totalDuration : Number(seg.end); 
                 }
 
-                // 4. Sanity Check: Prevent negative duration errors
-                // If the AI gave a start time that is AFTER the next start (impossible), fix it.
+                // 4. Sanity Check
                 if (end <= start) {
-                    end = start + 0.5; // Fallback minimal duration
+                    end = start + 0.5; 
                 }
 
                 return { 
@@ -263,7 +258,6 @@
             const effectiveKey = apiKey || DEFAULT_API_KEY;
             let parts = [];
             
-            // --- UPDATED: PROMPT FOCUSES ON START TIME ACCURACY ---
             if (fileObject) {
                 const filePart = await fileToGenerativePart(fileObject);
                 parts = [filePart, { text: `I will provide an audio file. 
@@ -397,7 +391,7 @@ Output strictly a VALID JSON array:
             const [sidebarOpen, setSidebarOpen] = useState(true); 
             const [transcriptOpen, setTranscriptOpen] = useState(true);
             const [fixPanelOpen, setFixPanelOpen] = useState(false);
-            const [fixPanelMode, setFixPanelMode] = useState('ai'); // 'ai' or 'manual'
+            const [fixPanelMode, setFixPanelMode] = useState('ai'); 
 
             const [source, setSource] = useState(null);
             const [transcript, setTranscript] = useState([]);
@@ -406,7 +400,6 @@ Output strictly a VALID JSON array:
             const [seekTrigger, setSeekTrigger] = useState(0);
             const [loopRange, setLoopRange] = useState(null);
             
-            // --- FIX: Use useRef for Stop Time to prevent stale closure issues in audio loop ---
             const stopAtTimeRef = useRef(null); 
             
             const [history, setHistory] = useState([]);
@@ -607,7 +600,6 @@ Output strictly a VALID JSON array:
 
             const handleTimeUpdate = (t) => {
                 setCurrentTime(t);
-                // FIX: Use REF.current to always get the freshest stop time, avoiding stale closures
                 if (stopAtTimeRef.current !== null && t >= stopAtTimeRef.current) {
                     setIsPlaying(false);
                     stopAtTimeRef.current = null;
@@ -664,7 +656,7 @@ Output strictly a VALID JSON array:
                 setReAnalysisPreview(null); setCorrectionHint(""); setSelectedIndices([]); setLastSelectedIndex(null); setFixPanelOpen(false);
             };
 
-            // --- FIXED MANUAL EDIT LOGIC ---
+            // --- FIXED: Manual Edit with Robust DB Sync ---
             const handleManualEditOpen = (e, index) => {
                 e.stopPropagation();
                 setEditingIndex(index);
@@ -680,10 +672,13 @@ Output strictly a VALID JSON array:
                 if (editingIndex === null) return;
                 setIsSavingManual(true);
 
+                // Create a backup of the current state for rollback
+                const previousTranscript = [...transcript];
+
                 try {
                     const newTranscript = JSON.parse(JSON.stringify(transcript));
-                    
                     const newEndVal = parseFloat(manualEndTime);
+                    
                     if (isNaN(newEndVal)) {
                         alert("Invalid Time format");
                         setIsSavingManual(false);
@@ -700,36 +695,29 @@ Output strictly a VALID JSON array:
                     }
 
                     if (shiftFollowing) {
-                        // RECALCULATE CHAIN (Preserve durations, don't just add diff)
-                        // This prevents floating point drift and "collapsed chain" bugs
                         let runningStart = newTranscript[editingIndex].end;
-
                         for (let i = editingIndex + 1; i < newTranscript.length; i++) {
                             const originalDuration = transcript[i].end - transcript[i].start;
-                            // Ensure duration is positive sanity check
                             const safeDuration = Math.max(0.1, originalDuration);
-                            
                             newTranscript[i].start = runningStart;
                             newTranscript[i].end = runningStart + safeDuration;
-                            
                             runningStart = newTranscript[i].end;
                         }
                     } else {
                         // Standard link: Just ensure next start touches this end
                         if (editingIndex + 1 < newTranscript.length) {
                              newTranscript[editingIndex + 1].start = newTranscript[editingIndex].end;
-                             // Prevent negative duration in next segment
                              if (newTranscript[editingIndex + 1].end <= newTranscript[editingIndex + 1].start) {
                                   newTranscript[editingIndex + 1].end = newTranscript[editingIndex + 1].start + 0.1;
                              }
                         }
                     }
 
-                    // Optimistic UI Update
+                    // 1. Optimistic UI Update
                     setTranscript(newTranscript);
                     
+                    // 2. Database Sync
                     if (user && source.id) {
-                        // DB UPDATE + SELECT in one go (Critical Fix)
                         const { data, error } = await supabase
                             .from('transcripts')
                             .update({ content: newTranscript })
@@ -737,8 +725,10 @@ Output strictly a VALID JSON array:
                             .select()
                             .single();
                             
-                        if (!error && data && data.content) {
-                            // Enforce DB state on UI to ensure sync
+                        // CRITICAL FIX: Explicit error check
+                        if (error) throw error;
+
+                        if (data && data.content) {
                             setTranscript(Array.isArray(data.content) ? data.content : newTranscript);
                             fetchHistory();
                         }
@@ -748,7 +738,9 @@ Output strictly a VALID JSON array:
                     setEditingIndex(null);
                 } catch (e) {
                     console.error("Save failed", e);
-                    alert("Failed to save changes. Please try again.");
+                    // Rollback UI to previous state
+                    setTranscript(previousTranscript); 
+                    alert("Failed to sync with database: " + e.message);
                 } finally {
                     setIsSavingManual(false);
                 }
@@ -761,7 +753,7 @@ Output strictly a VALID JSON array:
                 setCurrentTime(start);
                 setSeekTrigger(prev => prev + 1);
                 setIsPlaying(true);
-                stopAtTimeRef.current = endVal; // FIX: Update Ref
+                stopAtTimeRef.current = endVal; 
             };
 
             const handleShare = (item) => {
@@ -779,7 +771,7 @@ Output strictly a VALID JSON array:
                     setSeekTrigger(prev => prev + 1); 
                     setCurrentTime(seg.start); 
                     setIsPlaying(true); 
-                    stopAtTimeRef.current = seg.end; // FIX: Update Ref directly
+                    stopAtTimeRef.current = seg.end; 
                 }
             };
 
