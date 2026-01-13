@@ -188,6 +188,38 @@
                 </ModalLayout>
             );
         };
+
+        const ShareCollectionModal = ({ isOpen, onClose, onShare }) => {
+            const [email, setEmail] = useState("");
+            const [isLoading, setIsLoading] = useState(false);
+
+            const handleShare = async () => {
+                setIsLoading(true);
+                await onShare(email);
+                setIsLoading(false);
+                setEmail("");
+                onClose();
+            };
+
+            if (!isOpen) return null;
+            return (
+                <ModalLayout isOpen={isOpen} onClose={onClose} title="Share Collection" icon={Share2}>
+                    <div className="space-y-4">
+                        <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl flex gap-3">
+                            <User className="w-5 h-5 text-blue-600 shrink-0" />
+                            <p className="text-xs text-blue-800 leading-relaxed">Enter the email of the student or teacher you want to invite to this collection.</p>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">User Email</label>
+                            <input autoFocus type="email" className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-black" value={email} onChange={e => setEmail(e.target.value)} placeholder="student@example.com" />
+                        </div>
+                        <button onClick={handleShare} disabled={!email.trim() || isLoading} className="w-full bg-black text-white py-4 font-bold rounded-xl hover:bg-gray-800 disabled:opacity-50 flex justify-center items-center gap-2">
+                            {isLoading ? <Loader2 className="animate-spin w-4 h-4"/> : "Invite User"}
+                        </button>
+                    </div>
+                </ModalLayout>
+            );
+        };
         
         const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message }) => {
             return (
@@ -404,6 +436,7 @@ Output JSON:` }];
             const [collections, setCollections] = useState([]);
             const [activeCollectionId, setActiveCollectionId] = useState('default'); // 'default' = My Collection
             const [isCollectionModalOpen, setIsCollectionModalOpen] = useState(false);
+            const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
             const [source, setSource] = useState(null);
             const [transcript, setTranscript] = useState([]);
@@ -542,7 +575,7 @@ Output JSON:` }];
             }, [activeCollectionId, user]);
 
             const fetchCollections = async (uid) => {
-    const { data } = await supabase.from('collections').select('*').eq('user_id', uid).order('created_at');
+    const { data } = await supabase.from('collections').select('*').order('created_at');
     if (data) setCollections(data);
 };
 
@@ -554,6 +587,34 @@ const createCollection = async (name) => {
         setActiveCollectionId(data.id); // Switch to new folder
     }
 };
+
+const shareCollection = async (emailToInvite) => {
+                if (activeCollectionId === 'default') {
+                    alert("You cannot share your default 'My Collection'. Please create a new folder first.");
+                    return;
+                }
+                
+                // 1. Find the user ID securely using the RPC function
+                const { data: profileData, error: profileError } = await supabase
+                    .rpc('get_user_id_by_email', { email_input: emailToInvite.trim() });
+
+                if (profileError || !profileData) {
+                    alert("User not found! Make sure they have signed up for LingoMate first.");
+                    return;
+                }
+
+                // 2. Add them to the members table
+                const { error: memberError } = await supabase
+                    .from('collection_members')
+                    .insert({ collection_id: activeCollectionId, user_id: profileData.id });
+
+                if (memberError) {
+                    if (memberError.code === '23505') alert("This user is already a member!");
+                    else alert("Failed to share: " + memberError.message);
+                } else {
+                    alert(`Successfully shared with ${emailToInvite}`);
+                }
+            };
 
             const fetchUserRole = async (uid) => {
                 const { data } = await supabase
@@ -1004,6 +1065,7 @@ const createCollection = async (name) => {
             return (
                 <div className="h-full flex flex-col font-sans text-gray-900 bg-white fade-in overflow-hidden relative">
                     <CreateCollectionModal isOpen={isCollectionModalOpen} onClose={() => setIsCollectionModalOpen(false)} onCreate={createCollection} />
+                    <ShareCollectionModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={shareCollection} />
                     <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} onLogin={handleAuth} />
                     <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} apiKey={geminiKey} onSave={saveSettings} />
                     <VocabularyModal isOpen={isVocabOpen} onClose={() => setIsVocabOpen(false)} words={vocabulary} onDelete={deleteVocabWord} />
@@ -1137,6 +1199,13 @@ const createCollection = async (name) => {
                                     <button onClick={() => setIsCollectionModalOpen(true)} className="p-2 bg-black text-white rounded-xl hover:bg-gray-800 transition-colors" title="New Collection">
                                         <Plus className="w-4 h-4" />
                                     </button>
+
+                                    {/* --- NEW SHARE BUTTON --- */}
+                                    {activeCollectionId !== 'default' && (
+                                        <button onClick={() => setIsShareModalOpen(true)} className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors" title="Share Folder">
+                                            <Share2 className="w-4 h-4" />
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                             <div className="flex-1 overflow-y-auto p-3 space-y-2 min-w-[320px] custom-scrollbar">
