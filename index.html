@@ -173,6 +173,22 @@
             );
         };
 
+        const CreateCollectionModal = ({ isOpen, onClose, onCreate }) => {
+            const [name, setName] = useState("");
+            if (!isOpen) return null;
+            return (
+                <ModalLayout isOpen={isOpen} onClose={onClose} title="New Collection" icon={Layers}>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Collection Name</label>
+                            <input autoFocus type="text" className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-black" value={name} onChange={e => setName(e.target.value)} placeholder="e.g., French Lessons" />
+                        </div>
+                        <button onClick={() => { onCreate(name); setName(""); onClose(); }} disabled={!name.trim()} className="w-full bg-black text-white py-4 font-bold rounded-xl hover:bg-gray-800 disabled:opacity-50">Create Collection</button>
+                    </div>
+                </ModalLayout>
+            );
+        };
+        
         const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message }) => {
             return (
                 <ModalLayout isOpen={isOpen} onClose={onClose} title={title} icon={AlertTriangle}>
@@ -385,6 +401,9 @@ Output JSON:` }];
             const [fixPanelOpen, setFixPanelOpen] = useState(false);
             const [fixPanelMode, setFixPanelMode] = useState('ai'); // 'ai' or 'manual'
             const [userRole, setUserRole] = useState(null);
+            const [collections, setCollections] = useState([]);
+            const [activeCollectionId, setActiveCollectionId] = useState('default'); // 'default' = My Collection
+            const [isCollectionModalOpen, setIsCollectionModalOpen] = useState(false);
 
             const [source, setSource] = useState(null);
             const [transcript, setTranscript] = useState([]);
@@ -468,7 +487,8 @@ Output JSON:` }];
                         const { data: userData } = await supabase.auth.getUser();
                         if (userData.user) {
                             setUser(userData.user);
-                            fetchUserRole(userData.user.id); // <--- NEW: Get role on load
+                            fetchUserRole(userData.user.id);
+                            fetchCollections(userData.user.id); // <--- Add this
                             fetchSettings(userData.user.id);
                             fetchRecordings(userData.user.id);
                             fetchVocabulary(userData.user.id);
@@ -487,8 +507,9 @@ Output JSON:` }];
                     const cu = session?.user ?? null; 
                     setUser(cu); 
                     if (cu) { 
-                        fetchUserRole(cu.id); // <--- NEW: Get role on login
-                        fetchSettings(cu.id); 
+                        fetchUserRole(cu.id);
+                        fetchCollections(cu.id); // <--- Add this
+                        fetchSettings(cu.id);
                         fetchRecordings(cu.id); 
                         fetchVocabulary(cu.id); 
                         fetchHistory();
@@ -515,6 +536,25 @@ Output JSON:` }];
                 };
             }, []);
 
+            // --- NEW: Refresh list when switching folders ---
+            useEffect(() => {
+                if (user) fetchHistory();
+            }, [activeCollectionId, user]);
+
+            const fetchCollections = async (uid) => {
+    const { data } = await supabase.from('collections').select('*').eq('user_id', uid).order('created_at');
+    if (data) setCollections(data);
+};
+
+const createCollection = async (name) => {
+    if (!user) return;
+    const { data, error } = await supabase.from('collections').insert([{ user_id: user.id, name }]).select().single();
+    if (data) {
+        setCollections([...collections, data]);
+        setActiveCollectionId(data.id); // Switch to new folder
+    }
+};
+
             const fetchUserRole = async (uid) => {
                 const { data } = await supabase
                     .from('profiles')
@@ -535,10 +575,22 @@ Output JSON:` }];
             };
 
             const fetchHistory = async () => {
-                const { data } = await supabase.from('transcripts').select('*').order('created_at', { ascending: false });
+                if (!user) return;
+                
+                // Start building the query
+                let query = supabase.from('transcripts').select('*').eq('user_id', user.id);
+
+                // Filter: If 'default', look for NULL. Otherwise look for the ID.
+                if (activeCollectionId === 'default') {
+                    query = query.is('collection_id', null);
+                } else {
+                    query = query.eq('collection_id', activeCollectionId);
+                }
+
+                const { data } = await query.order('created_at', { ascending: false });
                 if (data) setHistory(data);
             };
-
+            
             const fetchRecordings = async (uid) => {
                 const { data } = await supabase.from('user_recordings').select('*').eq('user_id', uid).order('created_at', { ascending: false });
                 if (data) setRecordingsList(data);
@@ -593,7 +645,14 @@ Output JSON:` }];
                         const filePath = `${user.id}/${Date.now()}_${sanitizedTitle}`;
                         await supabase.storage.from('media').upload(filePath, source.fileData, { cacheControl: '3600', upsert: true });
                         const { data: urlData } = supabase.storage.from('media').getPublicUrl(filePath);
-                        await supabase.from('transcripts').upsert({ user_id: user.id, title: source.title, source_type: source.mediaType, source_url: urlData.publicUrl, content: result }, { onConflict: 'user_id, title' }).select().single().then(({data}) => {
+                        await supabase.from('transcripts').upsert({ 
+                            user_id: user.id, 
+                            collection_id: activeCollectionId === 'default' ? null : activeCollectionId, // <--- This saves it to the folder
+                            title: source.title, 
+                            source_type: source.mediaType, 
+                            source_url: urlData.publicUrl, 
+                            content: result 
+                        }, { onConflict: 'user_id, title' }).select().single().then(({data}) => {
                             if(data) setSource(prev => ({...prev, id: data.id}));
                         });
                         fetchHistory();
@@ -944,6 +1003,7 @@ Output JSON:` }];
 
             return (
                 <div className="h-full flex flex-col font-sans text-gray-900 bg-white fade-in overflow-hidden relative">
+                    <CreateCollectionModal isOpen={isCollectionModalOpen} onClose={() => setIsCollectionModalOpen(false)} onCreate={createCollection} />
                     <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} onLogin={handleAuth} />
                     <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} apiKey={geminiKey} onSave={saveSettings} />
                     <VocabularyModal isOpen={isVocabOpen} onClose={() => setIsVocabOpen(false)} words={vocabulary} onDelete={deleteVocabWord} />
@@ -1054,7 +1114,31 @@ Output JSON:` }];
 
                     <div className="flex-1 flex overflow-hidden">
                         <aside className={`${sidebarOpen ? 'w-80 border-r' : 'w-0'} bg-white transition-all duration-300 overflow-hidden flex flex-col z-10 relative`}>
-                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[320px]"><h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><History className="w-4 h-4" /> Library</h2><button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors"><ChevronLeft className="w-4 h-4" /></button></div>
+                            <div className="p-4 border-b bg-gray-50 space-y-3 min-w-[320px]">
+                                <div className="flex justify-between items-center">
+                                    <h2 className="font-bold text-sm text-gray-600 flex items-center gap-2">
+                                        <Layers className="w-4 h-4" /> Library
+                                    </h2>
+                                    <button onClick={() => setSidebarOpen(false)} className="p-1.5 hover:bg-gray-200 rounded-lg text-gray-400 transition-colors">
+                                        <ChevronLeft className="w-4 h-4" />
+                                    </button>
+                                </div>
+
+                                {/* Collection Selector */}
+                                <div className="flex gap-2">
+                                    <select 
+                                        value={activeCollectionId} 
+                                        onChange={(e) => setActiveCollectionId(e.target.value)} 
+                                        className="flex-1 bg-white border border-gray-200 text-xs font-bold rounded-xl px-3 py-2 outline-none focus:border-black cursor-pointer"
+                                    >
+                                        <option value="default">My Collection (Default)</option>
+                                        {collections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                    </select>
+                                    <button onClick={() => setIsCollectionModalOpen(true)} className="p-2 bg-black text-white rounded-xl hover:bg-gray-800 transition-colors" title="New Collection">
+                                        <Plus className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
                             <div className="flex-1 overflow-y-auto p-3 space-y-2 min-w-[320px] custom-scrollbar">
                                 {history.length === 0 && <div className="text-center p-8 opacity-20"><Database className="w-8 h-8 mx-auto mb-2" /><p className="text-xs font-semibold">No files saved</p></div>}
                                 {history.map(item => (
