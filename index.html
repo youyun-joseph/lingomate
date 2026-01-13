@@ -662,14 +662,15 @@ Output JSON:` }];
                 setSeekTrigger(prev => prev + 1);
             };
 
-            const confirmManualEdit = async () => {
+           const confirmManualEdit = async () => {
                 if (editingIndex === null) return;
                 setIsSavingManual(true);
 
                 try {
+                    // 1. Calculate the new transcript locally
                     const newTranscript = JSON.parse(JSON.stringify(transcript));
-                    
                     const newEndVal = parseFloat(manualEndTime);
+                    
                     if (isNaN(newEndVal)) {
                         alert("Invalid Time format");
                         setIsSavingManual(false);
@@ -685,56 +686,75 @@ Output JSON:` }];
                          newTranscript[editingIndex].end = newEndVal;
                     }
 
+                    // Shift logic (if enabled)
                     if (shiftFollowing) {
-                        // RECALCULATE CHAIN (Preserve durations, don't just add diff)
-                        // This prevents floating point drift and "collapsed chain" bugs
                         let runningStart = newTranscript[editingIndex].end;
-
                         for (let i = editingIndex + 1; i < newTranscript.length; i++) {
                             const originalDuration = transcript[i].end - transcript[i].start;
-                            // Ensure duration is positive sanity check
                             const safeDuration = Math.max(0.1, originalDuration);
-                            
                             newTranscript[i].start = runningStart;
                             newTranscript[i].end = runningStart + safeDuration;
-                            
                             runningStart = newTranscript[i].end;
                         }
                     } else {
-                        // Standard link: Just ensure next start touches this end
+                        // Standard link logic
                         if (editingIndex + 1 < newTranscript.length) {
                              newTranscript[editingIndex + 1].start = newTranscript[editingIndex].end;
-                             // Prevent negative duration in next segment
                              if (newTranscript[editingIndex + 1].end <= newTranscript[editingIndex + 1].start) {
                                   newTranscript[editingIndex + 1].end = newTranscript[editingIndex + 1].start + 0.1;
                              }
                         }
                     }
 
-                    // Optimistic UI Update
+                    // 2. Update the Screen (Optimistic UI)
                     setTranscript(newTranscript);
                     
-                    if (user && source.id) {
-                        // DB UPDATE + SELECT in one go (Critical Fix)
+                    // 3. Update the Database (Supabase)
+                    if (user) {
+                        if (!source.id) {
+                            console.warn("No Source ID found. Attempting to match by title...");
+                            const { data: foundData } = await supabase
+                                .from('transcripts')
+                                .select('id')
+                                .eq('user_id', user.id)
+                                .eq('title', source.title)
+                                .maybeSingle(); 
+
+                            if (foundData) {
+                                source.id = foundData.id;
+                            } else {
+                                alert("Warning: This transcript is not saved in your library yet. Please regenerate it while logged in to save changes permanently.");
+                                setIsSavingManual(false);
+                                return;
+                            }
+                        }
+
+                        // --- FIX IS HERE: We removed .single() ---
                         const { data, error } = await supabase
                             .from('transcripts')
                             .update({ content: newTranscript })
                             .eq('id', source.id)
-                            .select()
-                            .single();
-                            
-                        if (!error && data && data.content) {
-                            // Enforce DB state on UI to ensure sync
-                            setTranscript(Array.isArray(data.content) ? data.content : newTranscript);
-                            fetchHistory();
+                            .select(); 
+
+                        if (error) {
+                            console.error("Supabase Error:", error);
+                            alert("Failed to save to cloud: " + error.message);
+                        } else if (data && data.length === 0) {
+                            // Now we catch the specific error safely
+                            alert("Update failed: The database record was not found. You might not have permission to edit this file, or it was deleted.");
+                        } else {
+                            console.log("Saved successfully to Supabase!");
+                            fetchHistory(); 
                         }
+                    } else {
+                        console.log("User not logged in, changes are local only.");
                     }
                     
                     setFixPanelOpen(false);
                     setEditingIndex(null);
                 } catch (e) {
-                    console.error("Save failed", e);
-                    alert("Failed to save changes. Please try again.");
+                    console.error("Save logic failed", e);
+                    alert("An error occurred while saving: " + e.message);
                 } finally {
                     setIsSavingManual(false);
                 }
