@@ -638,13 +638,19 @@ const shareCollection = async (emailToInvite) => {
             const fetchHistory = async () => {
                 if (!user) return;
                 
-                // Start building the query
-                let query = supabase.from('transcripts').select('*').eq('user_id', user.id);
+                // FIX: Do NOT filter by .eq('user_id', user.id) here.
+                // We trust the Database Security Rules (RLS) to show us the correct files.
+                let query = supabase.from('transcripts').select('*');
 
-                // Filter: If 'default', look for NULL. Otherwise look for the ID.
+                // Filter: If 'default', look for NULL. Otherwise look for the specific folder ID.
                 if (activeCollectionId === 'default') {
-                    query = query.is('collection_id', null);
+                    // For "My Collection", we rely on RLS to only show our own files
+                    // But we explicitly check for NULL collection_id
+                    query = query.is('collection_id', null).eq('user_id', user.id); 
+                    // Note: For Default collection, we keep .eq('user_id') to be extra safe 
+                    // so we don't accidentally see other people's unfiled items if RLS fails.
                 } else {
+                    // For Shared Collections, we MUST accept files from other users.
                     query = query.eq('collection_id', activeCollectionId);
                 }
 
