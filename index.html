@@ -8,6 +8,11 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
+        /* Mobile responsive adjustments */
+        @media (max-width: 768px) {
+            .mobile-hide-scrollbar::-webkit-scrollbar { display: none; }
+            .mobile-hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        }
         body { font-family: 'Inter', sans-serif; }
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f9fafb; }
@@ -428,8 +433,29 @@ Output JSON:` }];
             const [isSettingsOpen, setIsSettingsOpen] = useState(false);
             const [isVocabOpen, setIsVocabOpen] = useState(false);
             const [isReplaceConfirmOpen, setIsReplaceConfirmOpen] = useState(false);
-            const [sidebarOpen, setSidebarOpen] = useState(true); 
-            const [transcriptOpen, setTranscriptOpen] = useState(true);
+            // --- RESPONSIVE STATE ---
+        const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
+        const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 1024);
+        // Default transcript to CLOSED on mobile, OPEN on large desktops
+        const [transcriptOpen, setTranscriptOpen] = useState(window.innerWidth >= 1280);
+
+        useEffect(() => {
+            const handleResize = () => {
+                const mobile = window.innerWidth < 1024;
+                setIsMobile(mobile);
+                if (mobile) {
+                    // Force close sidebars when resizing down to mobile
+                    setSidebarOpen(false);
+                    setTranscriptOpen(false); 
+                } else {
+                    // Force open sidebars when resizing up to desktop
+                    setSidebarOpen(true);
+                    setTranscriptOpen(window.innerWidth >= 1280);
+                }
+            };
+            window.addEventListener('resize', handleResize);
+            return () => window.removeEventListener('resize', handleResize);
+        }, []);
             const [fixPanelOpen, setFixPanelOpen] = useState(false);
             const [fixPanelMode, setFixPanelMode] = useState('ai'); // 'ai' or 'manual'
             const [userRole, setUserRole] = useState(null);
@@ -1180,8 +1206,17 @@ const shareCollection = async (emailToInvite) => {
                         </div>
                     </header>
 
-                    <div className="flex-1 flex overflow-hidden">
-                        <aside className={`${sidebarOpen ? 'w-80 border-r' : 'w-0'} bg-white transition-all duration-300 overflow-hidden flex flex-col z-10 relative`}>
+                    <div className="flex-1 flex overflow-hidden relative group-hover:cursor-auto">
+                        {/* Mobile Overlay for Library */}
+                    {isMobile && sidebarOpen && (
+                        <div onClick={() => setSidebarOpen(false)} className="fixed inset-0 bg-black/50 z-30 backdrop-blur-sm transition-opacity fade-in" />
+                    )}
+                    <aside className={`
+                        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0 lg:w-0 lg:border-none'} 
+                        ${isMobile ? 'fixed inset-y-0 left-0 z-40 w-80 shadow-2xl' : 'relative transition-all duration-300 ease-in-out border-r'}
+                        ${!isMobile && sidebarOpen ? 'w-80' : ''}
+                        bg-white flex flex-col overflow-hidden h-full
+                    `}>
                             <div className="p-4 border-b bg-gray-50 space-y-3 min-w-[320px]">
                                 <div className="flex justify-between items-center">
                                     <h2 className="font-bold text-sm text-gray-600 flex items-center gap-2">
@@ -1230,12 +1265,26 @@ const shareCollection = async (emailToInvite) => {
                         </aside>
 
                         <main className="flex-1 flex flex-col min-w-0 bg-gray-50 overflow-hidden relative">
-                            {!sidebarOpen && <div className="absolute top-4 left-4 z-20"><button onClick={() => setSidebarOpen(true)} className="p-3 bg-white border border-gray-200 rounded-full text-gray-600 shadow-lg hover:bg-gray-50 flex items-center gap-2 px-5 font-bold text-xs uppercase tracking-widest"><History className="w-4 h-4" /> Library <ChevronRight className="w-4 h-4" /></button></div>}
+                            {/* Toggle Button: Library */}
+                            {(!sidebarOpen || isMobile) && (
+                                <div className="absolute top-4 left-4 z-20">
+                                    <button onClick={() => setSidebarOpen(true)} className="p-3 bg-white/90 backdrop-blur border border-gray-200 rounded-full text-gray-600 shadow-lg hover:bg-gray-50 flex items-center gap-2 px-4 font-bold text-xs uppercase tracking-widest transition-transform hover:scale-105 active:scale-95">
+                                        <History className="w-4 h-4" /> <span className="hidden sm:inline">Library</span>
+                                    </button>
+                                </div>
+                            )}
                             
-                            {!transcriptOpen && transcript.length > 0 && <div className="absolute top-4 right-4 z-20"><button onClick={() => setTranscriptOpen(true)} className="p-3 bg-white border border-gray-200 rounded-full text-gray-600 shadow-lg hover:bg-gray-50 flex items-center gap-2 px-5 font-bold text-xs uppercase tracking-widest"><ChevronLeft className="w-4 h-4" /> Transcript <FileText className="w-4 h-4" /></button></div>}
+                            {/* Toggle Button: Transcript */}
+                            {(!transcriptOpen || isMobile) && transcript.length > 0 && (
+                                <div className="absolute top-4 right-4 z-20">
+                                    <button onClick={() => setTranscriptOpen(true)} className="p-3 bg-white/90 backdrop-blur border border-gray-200 rounded-full text-gray-600 shadow-lg hover:bg-gray-50 flex items-center gap-2 px-4 font-bold text-xs uppercase tracking-widest transition-transform hover:scale-105 active:scale-95">
+                                        <span className="hidden sm:inline">Transcript</span> <FileText className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            )}
 
                             <div className="flex-1 flex flex-col overflow-y-auto relative custom-scrollbar">
-                                <div className="px-8 pb-12 pt-16 max-w-3xl mx-auto w-full">
+                                <div className="px-4 md:px-8 pb-24 pt-20 max-w-3xl mx-auto w-full">
                                     {!source ? (
                                         // LOGIC: If user is logged in AND is a student, show "Student Workspace"
                                         user && userRole === 'student' ? (
@@ -1354,7 +1403,16 @@ const shareCollection = async (emailToInvite) => {
                             </div>
                         </main>
 
-                        <aside className={`${transcriptOpen && transcript.length > 0 ? 'w-[450px] border-l' : 'w-0'} bg-white transition-all duration-300 overflow-hidden flex flex-col z-10 relative shadow-inner`}>
+                        {/* Mobile Overlay for Transcript */}
+                    {isMobile && transcriptOpen && (
+                        <div onClick={() => setTranscriptOpen(false)} className="fixed inset-0 bg-black/50 z-30 backdrop-blur-sm transition-opacity fade-in" />
+                    )}
+                        <aside className={`
+                        ${transcriptOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0 lg:w-0 lg:border-none'}
+                        ${isMobile ? 'fixed inset-y-0 right-0 z-40 w-full md:w-[450px] shadow-2xl' : 'relative transition-all duration-300 ease-in-out border-l'}
+                        ${!isMobile && transcriptOpen ? 'w-[450px]' : ''}
+                        bg-white flex flex-col overflow-hidden h-full
+                    `}>
                             <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[450px]">
                                 <h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><FileText size={16} /> Full Transcript</h2>
                                 <div className="flex items-center gap-2">
