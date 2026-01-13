@@ -384,6 +384,7 @@ Output JSON:` }];
             const [transcriptOpen, setTranscriptOpen] = useState(true);
             const [fixPanelOpen, setFixPanelOpen] = useState(false);
             const [fixPanelMode, setFixPanelMode] = useState('ai'); // 'ai' or 'manual'
+            const [userRole, setUserRole] = useState(null);
 
             const [source, setSource] = useState(null);
             const [transcript, setTranscript] = useState([]);
@@ -467,6 +468,7 @@ Output JSON:` }];
                         const { data: userData } = await supabase.auth.getUser();
                         if (userData.user) {
                             setUser(userData.user);
+                            fetchUserRole(userData.user.id); // <--- NEW: Get role on load
                             fetchSettings(userData.user.id);
                             fetchRecordings(userData.user.id);
                             fetchVocabulary(userData.user.id);
@@ -485,10 +487,13 @@ Output JSON:` }];
                     const cu = session?.user ?? null; 
                     setUser(cu); 
                     if (cu) { 
+                        fetchUserRole(cu.id); // <--- NEW: Get role on login
                         fetchSettings(cu.id); 
                         fetchRecordings(cu.id); 
                         fetchVocabulary(cu.id); 
                         fetchHistory();
+                    } else {
+                        setUserRole(null); // <--- NEW: Clear role on logout
                     }
                 });
                 const handleMouseUp = () => {
@@ -509,6 +514,15 @@ Output JSON:` }];
                     document.removeEventListener('mouseup', handleMouseUp);
                 };
             }, []);
+
+            const fetchUserRole = async (uid) => {
+                const { data } = await supabase
+                    .from('profiles')
+                    .select('role')
+                    .eq('id', uid)
+                    .maybeSingle(); // Use maybeSingle to be safe
+                if (data) setUserRole(data.role);
+            };
 
             const fetchSettings = async (uid) => {
                 const { data } = await supabase.from('user_settings').select('gemini_api_key').eq('user_id', uid).single();
@@ -1064,12 +1078,26 @@ Output JSON:` }];
                             <div className="flex-1 flex flex-col overflow-y-auto relative custom-scrollbar">
                                 <div className="px-8 pb-12 pt-16 max-w-3xl mx-auto w-full">
                                     {!source ? (
-                                        <div className="mt-16 bg-white p-12 border border-gray-100 shadow-sm rounded-3xl text-center group">
-                                            <div className="w-16 h-16 bg-gray-50 mx-auto mb-6 flex items-center justify-center group-hover:bg-black rounded-2xl"><Upload className="w-8 h-8" /></div>
-                                            <h3 className="font-bold text-2xl mb-2 text-gray-900">Analyze media</h3>
-                                            <p className="text-gray-500 text-sm mb-8 font-normal">Upload an audio or video file to start practice.</p>
-                                            <label className="block w-full bg-black text-white py-4 font-bold rounded-2xl cursor-pointer hover:bg-gray-800 shadow-lg">Select file<input type="file" className="hidden" accept="video/*,audio/*" onChange={handleFileUpload} /></label>
-                                        </div>
+                                        // LOGIC: If user is logged in AND is a student, show "Student Workspace"
+                                        user && userRole === 'student' ? (
+                                            <div className="mt-16 bg-white p-12 border border-gray-100 shadow-sm rounded-3xl text-center">
+                                                <div className="w-16 h-16 bg-gray-50 mx-auto mb-6 flex items-center justify-center rounded-2xl text-gray-400">
+                                                    <BookOpen className="w-8 h-8" />
+                                                </div>
+                                                <h3 className="font-bold text-2xl mb-2 text-gray-900">Student Workspace</h3>
+                                                <p className="text-gray-500 text-sm mb-8 font-normal">
+                                                    Please select a lesson from your Library sidebar to begin practice.
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            // LOGIC: Otherwise (Teacher or Guest), show the Upload Button
+                                            <div className="mt-16 bg-white p-12 border border-gray-100 shadow-sm rounded-3xl text-center group">
+                                                <div className="w-16 h-16 bg-gray-50 mx-auto mb-6 flex items-center justify-center group-hover:bg-black rounded-2xl"><Upload className="w-8 h-8" /></div>
+                                                <h3 className="font-bold text-2xl mb-2 text-gray-900">Analyze media</h3>
+                                                <p className="text-gray-500 text-sm mb-8 font-normal">Upload an audio or video file to start practice.</p>
+                                                <label className="block w-full bg-black text-white py-4 font-bold rounded-2xl cursor-pointer hover:bg-gray-800 shadow-lg">Select file<input type="file" className="hidden" accept="video/*,audio/*" onChange={handleFileUpload} /></label>
+                                            </div>
+                                        )
                                     ) : transcript.length === 0 ? (
                                         <div className="mt-16 bg-white p-10 flex flex-col items-center text-center rounded-3xl shadow-sm border border-gray-100">
                                             <div className="w-12 h-12 bg-gray-50 flex items-center justify-center rounded-xl mb-4 text-gray-400"><FileText className="w-6 h-6" /></div>
