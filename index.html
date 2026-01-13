@@ -1197,12 +1197,36 @@ const shareCollection = async (emailToInvite) => {
                         </div>
                     </div>
 
-                    <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center z-20 shadow-none">
-                        <div className="flex items-center gap-3"><div className="bg-black p-2 rounded-lg"><Volume2 className="text-white w-5 h-5" /></div><h1 className="text-xl font-bold text-black tracking-tight">LingoMate <span className="text-xs text-white bg-black px-1.5 ml-1 rounded-md italic font-normal">Listening Practice</span></h1></div>
+                    <header className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 md:py-4 flex justify-between items-center z-20 shadow-none sticky top-0">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-black p-2 rounded-lg">
+                                <Volume2 className="text-white w-5 h-5" />
+                            </div>
+                            <h1 className="text-lg md:text-xl font-bold text-black tracking-tight">
+                                LingoMate 
+                                <span className="hidden md:inline-block text-xs text-white bg-black px-1.5 ml-1 rounded-md italic font-normal">Listening Practice</span>
+                            </h1>
+                        </div>
                         <div className="flex items-center gap-2">
-                            <button onClick={() => setIsVocabOpen(true)} className="flex items-center gap-2 px-4 py-2 hover:bg-gray-50 rounded-full transition-colors font-semibold text-sm text-gray-600"><BookOpen className="w-4 h-4" /> Vocabulary</button>
-                            <button onClick={() => setIsSettingsOpen(true)} className={`p-2 transition-all ${!geminiKey ? 'text-red-500 animate-pulse' : 'text-gray-400'}`}><Settings className="w-5 h-5" /></button>
-                            {user ? <div className="flex items-center gap-3 border border-gray-200 pl-3 pr-2 py-1.5 rounded-full font-medium text-sm text-gray-600"><span>{user.email?.split('@')[0]}</span><button onClick={() => { supabase.auth.signOut(); setUser(null); }} className="p-1 bg-gray-100 rounded-full hover:bg-black hover:text-white transition-colors"><LogOut className="w-4 h-4" /></button></div> : <button onClick={() => setIsLoginOpen(true)} className="px-5 py-2 bg-black text-white font-bold text-sm rounded-full transition-colors">Sign in</button>}
+                            <button onClick={() => setIsVocabOpen(true)} className="flex items-center gap-2 px-3 md:px-4 py-2 hover:bg-gray-50 rounded-full transition-colors font-semibold text-sm text-gray-600">
+                                <BookOpen className="w-5 h-5 md:w-4 md:h-4" /> 
+                                <span className="hidden md:inline">Vocabulary</span>
+                            </button>
+                            <button onClick={() => setIsSettingsOpen(true)} className={`p-2 transition-all ${!geminiKey ? 'text-red-500 animate-pulse' : 'text-gray-400'}`}>
+                                <Settings className="w-5 h-5" />
+                            </button>
+                            {user ? (
+                                <div className="flex items-center gap-3 border border-gray-200 pl-3 pr-2 py-1.5 rounded-full font-medium text-sm text-gray-600">
+                                    <span className="hidden md:inline">{user.email?.split('@')[0]}</span>
+                                    <button onClick={() => { supabase.auth.signOut(); setUser(null); }} className="p-1 bg-gray-100 rounded-full hover:bg-black hover:text-white transition-colors">
+                                        <LogOut className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            ) : (
+                                <button onClick={() => setIsLoginOpen(true)} className="px-4 md:px-5 py-2 bg-black text-white font-bold text-sm rounded-full transition-colors">
+                                    Sign in
+                                </button>
+                            )}
                         </div>
                     </header>
 
@@ -1413,14 +1437,14 @@ const shareCollection = async (emailToInvite) => {
                         ${!isMobile && transcriptOpen ? 'w-[450px]' : ''}
                         bg-white flex flex-col overflow-hidden h-full
                     `}>
-                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap min-w-[450px]">
+                            <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap w-full md:min-w-[450px]">
                                 <h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><FileText size={16} /> Full Transcript</h2>
                                 <div className="flex items-center gap-2">
                                     <button onClick={() => { setFixPanelMode('ai'); setFixPanelOpen(!fixPanelOpen); }} title="AI Fix Tools" className={`p-2 rounded-lg transition-all ${fixPanelOpen && fixPanelMode === 'ai' ? 'bg-red-100 text-red-600' : 'text-gray-400 hover:text-red-500'}`}><Wand2 size={18} /></button>
                                     <button onClick={() => setTranscriptOpen(false)} className="p-1.5 rounded-lg text-gray-400 transition-colors"><ChevronRight size={18} /></button>
                                 </div>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-4 space-y-4 min-w-[450px] custom-scrollbar pb-24 bg-gray-50/30">
+                            <div className="flex-1 overflow-y-auto p-4 space-y-4 w-full md:min-w-[450px] custom-scrollbar pb-24 bg-gray-50/30">
                                 <div className="text-[10px] text-gray-400 font-medium px-2 mb-2 italic flex justify-between items-center">
                                     <span>Tip: Use Ctrl+Shift to multiselect</span>
                                     {selectedIndices.length > 0 && <button onClick={() => { setSelectedIndices([]); setLastSelectedIndex(null); }} className="text-indigo-600 font-bold hover:underline">Clear Selection</button>}
