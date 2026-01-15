@@ -1125,27 +1125,40 @@ const shareCollection = async (emailToInvite) => {
                                             setDictationValues(p => ({ ...p, [currentKey]: inputVal }));
 
                                             if (inputVal) {
-                                                // FIX: Use setTimeout to prevent double-typing bug
-                                                // This ensures the keystroke is finished before focus moves
+                                                // FIX: Increased timeout to 10ms to ensure the browser event 
+                                                // loop completely clears the keystroke before moving focus.
                                                 setTimeout(() => {
+                                                    let nextElement = null;
+                                                    
                                                     if (charIdx < word.length - 1) {
-                                                        document.getElementById(`input-${wordIdx}_${charIdx + 1}`)?.focus();
+                                                        nextElement = document.getElementById(`input-${wordIdx}_${charIdx + 1}`);
                                                     } else if (!isLastWord) {
-                                                        document.getElementById(`input-${wordIdx}_space`)?.focus();
+                                                        nextElement = document.getElementById(`input-${wordIdx}_space`);
                                                     }
-                                                }, 0);
+                                                    
+                                                    if (nextElement) {
+                                                        nextElement.focus();
+                                                        // Optional: Select text so typing overwrites if backtracking
+                                                        nextElement.select(); 
+                                                    }
+                                                }, 10);
                                             }
                                         };
 
                                         const handleKeyDown = (e) => {
                                             if (e.key === 'Backspace' && !val) {
+                                                e.preventDefault(); // Prevent browser back navigation
                                                 if (charIdx > 0) {
-                                                    document.getElementById(`input-${wordIdx}_${charIdx - 1}`)?.focus();
+                                                    const prev = document.getElementById(`input-${wordIdx}_${charIdx - 1}`);
+                                                    if (prev) { prev.focus(); prev.select(); }
                                                 } else if (wordIdx > 0) {
-                                                    document.getElementById(`input-${wordIdx - 1}_space`)?.focus();
+                                                    const prevSpace = document.getElementById(`input-${wordIdx - 1}_space`);
+                                                    if (prevSpace) { prevSpace.focus(); prevSpace.select(); }
                                                 }
                                             }
                                         };
+
+                                        const handleFocus = (e) => e.target.select();
 
                                         return (
                                             <input
@@ -1158,6 +1171,7 @@ const shareCollection = async (emailToInvite) => {
                                                 value={val}
                                                 onChange={handleChange}
                                                 onKeyDown={handleKeyDown}
+                                                onFocus={handleFocus}
                                             />
                                         );
                                     })}
@@ -1178,19 +1192,25 @@ const shareCollection = async (emailToInvite) => {
                                                     autoComplete="off"
                                                     className={`dictation-input dictation-space ${isCorrect ? 'correct' : ''} ${isIncorrect ? 'incorrect' : ''}`}
                                                     value={val}
+                                                    onFocus={(e) => e.target.select()}
                                                     onChange={(e) => {
                                                         const inputVal = e.target.value.slice(-1);
                                                         setDictationValues(p => ({ ...p, [spaceKey]: inputVal }));
                                                         if (inputVal) {
-                                                            // FIX: Use setTimeout here as well
                                                             setTimeout(() => {
-                                                                document.getElementById(`input-${wordIdx + 1}_0`)?.focus();
-                                                            }, 0);
+                                                                const nextWordStart = document.getElementById(`input-${wordIdx + 1}_0`);
+                                                                if (nextWordStart) {
+                                                                    nextWordStart.focus();
+                                                                    nextWordStart.select();
+                                                                }
+                                                            }, 10);
                                                         }
                                                     }}
                                                     onKeyDown={(e) => {
                                                         if (e.key === 'Backspace' && !val) {
-                                                            document.getElementById(`input-${wordIdx}_${word.length - 1}`)?.focus();
+                                                            e.preventDefault();
+                                                            const lastCharOfPrev = document.getElementById(`input-${wordIdx}_${word.length - 1}`);
+                                                            if (lastCharOfPrev) { lastCharOfPrev.focus(); lastCharOfPrev.select(); }
                                                         }
                                                     }}
                                                 />
