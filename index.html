@@ -48,11 +48,19 @@
             border-bottom-color: transparent !important;
         }
 
-        /* Keep focus styles visible (optional, or remove if you want total invisibility) */
-        .dictation-input:focus, .dictation-space:focus { 
+       /* 1. Standard Input Focus: Dark line */
+        .dictation-input:focus { 
+            border-bottom-color: #000; 
             background: #f9fafb; 
-            border-bottom-color: #e5e7eb; /* Only show line when typing/focused */
         }
+
+        /* 2. Space Input Focus: KEEP TRANSPARENT (Fixes the visible line issue) */
+        .dictation-space:focus { 
+            border-bottom-color: transparent !important; 
+            background: #f9fafb; /* Optional: Keep background so cursor is visible */
+            outline: none;       /* Remove default browser outline */
+        }
+
         .dictation-input:focus, .dictation-space:focus { border-bottom-color: #000; background: #f9fafb; }
         .dictation-input.correct, .dictation-space.correct { color: #059669; border-bottom-color: #059669; }
         .dictation-input.incorrect, .dictation-space.incorrect { color: #dc2626; border-bottom-color: #dc2626; }
@@ -375,7 +383,14 @@ Output JSON:` }];
         const fetchMeaningAndGrammar = async (apiKey, sentence) => {
             const effectiveKey = apiKey || DEFAULT_API_KEY;
             const body = {
-                contents: [{ parts: [{ text: `Analyze: "${sentence}". Provide translation and key grammar. ALL EXPLANATIONS MUST BE IN CHINESE SIMPLIFIED (简体中文). Output strictly JSON: { "meaning": "...", "grammar": "..." }.` }] }],
+                // UPDATE: Request 3 specific parts in the JSON prompt
+                contents: [{ parts: [{ text: `Analyze: "${sentence}". 
+Provide:
+1. Chinese Translation (translation).
+2. Detailed explanation of meaning, nuance, and vocabulary (explanation).
+3. Key Grammar analysis (grammar).
+ALL EXPLANATIONS MUST BE IN CHINESE SIMPLIFIED (简体中文). 
+Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "..." }.` }] }],
                 generationConfig: { responseMimeType: "application/json" }
             };
             const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
@@ -1181,7 +1196,7 @@ const shareCollection = async (emailToInvite) => {
                     </div>
                 );
             };
-            
+
             const loadSession = (item) => { 
                 let content = item.content || [];
                 if (typeof content === 'string') {
@@ -1502,21 +1517,107 @@ const shareCollection = async (emailToInvite) => {
                                                                 <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100"><p className="text-lg font-semibold text-gray-900 leading-relaxed italic">{transcript[activeIndex]?.text || "Select a segment to practice"}</p></div>
                                                                 <label className="text-xs font-bold text-gray-400 uppercase px-1 tracking-widest">Your translation</label>
                                                                 <textarea className="w-full p-6 bg-white border border-gray-200 rounded-3xl text-lg outline-none focus:ring-2 focus:ring-indigo-500 min-h-[120px] transition-all" placeholder="Type your translation here..." value={translationAttempt} onChange={(e) => setTranslationAttempt(e.target.value)} />
-                                                                {showTranslationAnswer && analysis?.meaning && (<div className="p-6 bg-emerald-50 text-emerald-900 border border-emerald-100 rounded-2xl fade-in"><h5 className="text-[10px] font-bold uppercase tracking-widest mb-2 opacity-60 text-emerald-700">AI Translation Reference</h5><p className="text-sm font-medium leading-relaxed">{analysis.meaning}</p></div>)}
-                                                                <div className="flex gap-4"><button onClick={() => { if (!analysis) triggerAnalysis(); setShowTranslationAnswer(true); }} className="flex-1 py-4 bg-black text-white font-bold rounded-2xl shadow-lg hover:bg-gray-800 transition-all flex items-center justify-center gap-2"><CheckCircle2 size={18} /> Check & Show Answer</button><button onClick={() => { setTranslationAttempt(""); setShowTranslationAnswer(false); }} className="px-8 py-4 bg-gray-100 text-gray-600 font-bold rounded-2xl hover:bg-gray-200 transition-all">Reset</button></div>
-                                                            </div>
+                                                                {/* --- NEW BUTTONS WITH LOADING STATE --- */}
+                                    <div className="flex gap-4">
+                                        <button 
+                                            onClick={() => { if (!analysis) triggerAnalysis(); setShowTranslationAnswer(true); }} 
+                                            disabled={isAnalyzing}
+                                            className="flex-1 py-4 bg-black text-white font-bold rounded-2xl shadow-lg hover:bg-gray-800 transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-wait"
+                                        >
+                                            {isAnalyzing ? (
+                                                <><Loader2 className="animate-spin w-5 h-5" /> Analyzing...</>
+                                            ) : (
+                                                <><CheckCircle2 size={18} /> Check & Show Answer</>
+                                            )}
+                                        </button>
+                                        <button onClick={() => { setTranslationAttempt(""); setShowTranslationAnswer(false); }} className="px-8 py-4 bg-gray-100 text-gray-600 font-bold rounded-2xl hover:bg-gray-200 transition-all">Reset</button>
+                                    </div>
+
+                                    {/* --- NEW 3-PART ANSWER DISPLAY --- */}
+                                    {showTranslationAnswer && analysis && (
+                                        <div className="mt-6 space-y-4 fade-in pb-10">
+                                            {/* Part 1: Translation */}
+                                            <div className="p-5 bg-emerald-50 text-emerald-900 border border-emerald-100 rounded-2xl">
+                                                <h5 className="text-[10px] font-bold uppercase tracking-widest mb-2 opacity-60 text-emerald-700 flex items-center gap-2">
+                                                    <Languages size={12}/> Translation
+                                                </h5>
+                                                <p className="text-sm font-medium leading-relaxed">{analysis.translation || analysis.meaning}</p>
+                                            </div>
+
+                                            {/* Part 2: Explanation */}
+                                            <div className="p-5 bg-blue-50 text-blue-900 border border-blue-100 rounded-2xl">
+                                                <h5 className="text-[10px] font-bold uppercase tracking-widest mb-2 opacity-60 text-blue-700 flex items-center gap-2">
+                                                    <BookOpen size={12}/> Explanation
+                                                </h5>
+                                                <p className="text-sm font-normal leading-relaxed">{analysis.explanation || "No explanation provided."}</p>
+                                            </div>
+
+                                            {/* Part 3: Grammar */}
+                                            <div className="p-5 bg-indigo-50 text-indigo-900 border border-indigo-100 rounded-2xl">
+                                                <h5 className="text-[10px] font-bold uppercase tracking-widest mb-2 opacity-60 text-indigo-700 flex items-center gap-2">
+                                                    <Sparkles size={12}/> Grammar
+                                                </h5>
+                                                <p className="text-sm font-normal leading-relaxed whitespace-pre-wrap">{analysis.grammar}</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                                                </div>
                                                         </div>
                                                     )}
+
                                                     {activeTab === 'Meaning and Grammar' && (
-                                                        <div className="h-full flex flex-col space-y-6 fade-in p-2">{!analysis ? <div className="flex flex-col items-center justify-center py-20 text-gray-400"><BookOpen size={48} className="mb-4 opacity-20" /><p className="text-sm font-medium">Select a segment and click "Check" or analyze</p></div> : 
-                                                            <div className="space-y-8 animate-in fade-in duration-500 relative pb-20">
-                                                                <section><h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Original sentence</h4><div className="p-6 bg-gray-50 rounded-2xl border border-gray-100"><p className="text-lg font-bold text-gray-900 leading-relaxed italic">"{analysis.content}"</p></div></section>
-                                                                <section><h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Translation / Meaning</h4><div className="p-6 bg-blue-50/50 rounded-2xl border border-blue-100"><p className="text-base font-medium text-blue-900 leading-relaxed">{analysis.meaning}</p></div></section>
-                                                                <section><h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Key grammar</h4><div className="p-6 bg-emerald-50/50 rounded-2xl border border-emerald-100"><p className="text-sm text-emerald-900 leading-relaxed font-normal whitespace-pre-wrap">{analysis.grammar}</p></div></section>
-                                                                <button onClick={saveVocabWord} className="fixed bottom-10 right-10 flex items-center gap-2 px-8 py-4 bg-yellow-400 text-black font-bold rounded-2xl shadow-xl hover:scale-105 active:scale-95 transition-all"><Save size={20} /> Add to vocabulary</button>
-                                                            </div>
-                                                        }</div>
-                                                    )}
+                                        <div className="h-full flex flex-col space-y-6 fade-in p-2">
+                                            {!analysis ? (
+                                                <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                                                    <BookOpen size={48} className="mb-4 opacity-20" />
+                                                    <p className="text-sm font-medium">Select a segment and click "Analyze"</p>
+                                                    {/* Added Analyze Button here for convenience */}
+                                                    <button onClick={triggerAnalysis} disabled={isAnalyzing} className="mt-6 px-8 py-3 bg-black text-white font-bold rounded-2xl shadow-lg flex items-center gap-2 hover:bg-gray-800 transition-all">
+                                                        {isAnalyzing ? <Loader2 className="animate-spin w-4 h-4" /> : <Sparkles size={16} />} 
+                                                        {isAnalyzing ? "Analyzing..." : "Analyze Segment"}
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-6 animate-in fade-in duration-500 relative pb-20">
+                                                    {/* Section 1: Original */}
+                                                    <section>
+                                                        <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Original sentence</h4>
+                                                        <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
+                                                            <p className="text-lg font-bold text-gray-900 leading-relaxed italic">"{analysis.content}"</p>
+                                                        </div>
+                                                    </section>
+
+                                                    {/* Section 2: Translation */}
+                                                    <section>
+                                                        <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Translation</h4>
+                                                        <div className="p-6 bg-emerald-50/50 rounded-2xl border border-emerald-100">
+                                                            <p className="text-base font-medium text-emerald-900 leading-relaxed">{analysis.translation || analysis.meaning}</p>
+                                                        </div>
+                                                    </section>
+
+                                                    {/* Section 3: Explanation (NEW) */}
+                                                    <section>
+                                                        <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Explanation</h4>
+                                                        <div className="p-6 bg-blue-50/50 rounded-2xl border border-blue-100">
+                                                            <p className="text-sm text-blue-900 leading-relaxed">{analysis.explanation}</p>
+                                                        </div>
+                                                    </section>
+
+                                                    {/* Section 4: Grammar */}
+                                                    <section>
+                                                        <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Key grammar</h4>
+                                                        <div className="p-6 bg-indigo-50/50 rounded-2xl border border-indigo-100">
+                                                            <p className="text-sm text-indigo-900 leading-relaxed font-normal whitespace-pre-wrap">{analysis.grammar}</p>
+                                                        </div>
+                                                    </section>
+
+                                                    <button onClick={saveVocabWord} className="fixed bottom-10 right-10 flex items-center gap-2 px-8 py-4 bg-yellow-400 text-black font-bold rounded-2xl shadow-xl hover:scale-105 active:scale-95 transition-all z-50">
+                                                        <Save size={20} /> Add to vocabulary
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                                 </div>
                                             </div>
                                         </div>
