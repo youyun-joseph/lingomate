@@ -35,10 +35,23 @@
             margin: 0 1px;
         }
         /* NEW: Specific style for the space input */
+        /* Updated Space Style: Transparent border so it's invisible but holds space */
         .dictation-space {
-            width: 1.5rem; /* Wider than letters */
-            border-bottom: 2px solid #e5e7eb; /* Visible line so they know to type there */
-            margin: 0 4px; /* Extra breathing room */
+            width: 1rem;       /* Slightly narrower */
+            border-bottom: 2px solid transparent; /* Hide the line */
+            margin: 0 2px;
+            transition: all 0.2s;
+        }
+        
+        /* NEW: Class for punctuation to hide lines */
+        .dictation-no-border {
+            border-bottom-color: transparent !important;
+        }
+
+        /* Keep focus styles visible (optional, or remove if you want total invisibility) */
+        .dictation-input:focus, .dictation-space:focus { 
+            background: #f9fafb; 
+            border-bottom-color: #e5e7eb; /* Only show line when typing/focused */
         }
         .dictation-input:focus, .dictation-space:focus { border-bottom-color: #000; background: #f9fafb; }
         .dictation-input.correct, .dictation-space.correct { color: #059669; border-bottom-color: #059669; }
@@ -1073,37 +1086,33 @@ const shareCollection = async (emailToInvite) => {
                 const activeSentence = transcript[activeIndex]?.text || "";
                 if (!activeSentence) return <p className="text-gray-300 italic">Select a sentence to begin</p>;
                 
-                // Split by space to group words visually, but keep punctuation attached to words
                 const words = activeSentence.split(' ');
 
                 return (
-                    <div className="flex flex-wrap gap-x-8 gap-y-8 justify-center w-full leading-loose">
+                    <div className="flex flex-wrap gap-x-6 gap-y-8 justify-center w-full leading-loose">
                         {words.map((word, wordIdx) => {
                             const isLastWord = wordIdx === words.length - 1;
                             
                             return (
                                 <div key={wordIdx} className="flex items-end flex-wrap">
-                                    {/* Render every character in the word (letters + punctuation) */}
                                     {word.split('').map((char, charIdx) => {
                                         const currentKey = `${wordIdx}_${charIdx}`;
                                         const val = dictationValues[currentKey] || '';
                                         
-                                        // Validation
+                                        // Detect Punctuation (Common marks)
+                                        const isPunctuation = /^[.,!?;:'"()\-–—]+$/.test(char);
+                                        
                                         const isCorrect = val.toLowerCase() === char.toLowerCase();
                                         const isIncorrect = dictationChecked && val && !isCorrect;
 
-                                        // Focus Logic
                                         const handleChange = (e) => {
-                                            const inputVal = e.target.value.slice(-1); // Take last char typed
+                                            const inputVal = e.target.value.slice(-1); 
                                             setDictationValues(p => ({ ...p, [currentKey]: inputVal }));
 
                                             if (inputVal) {
-                                                // If not last char of word, go to next char
                                                 if (charIdx < word.length - 1) {
                                                     document.getElementById(`input-${wordIdx}_${charIdx + 1}`)?.focus();
-                                                } 
-                                                // If last char of word AND not last word, go to SPACE input
-                                                else if (!isLastWord) {
+                                                } else if (!isLastWord) {
                                                     document.getElementById(`input-${wordIdx}_space`)?.focus();
                                                 }
                                             }
@@ -1111,11 +1120,9 @@ const shareCollection = async (emailToInvite) => {
 
                                         const handleKeyDown = (e) => {
                                             if (e.key === 'Backspace' && !val) {
-                                                // Move back
                                                 if (charIdx > 0) {
                                                     document.getElementById(`input-${wordIdx}_${charIdx - 1}`)?.focus();
                                                 } else if (wordIdx > 0) {
-                                                    // Go back to the space of previous word
                                                     document.getElementById(`input-${wordIdx - 1}_space`)?.focus();
                                                 }
                                             }
@@ -1127,7 +1134,8 @@ const shareCollection = async (emailToInvite) => {
                                                 id={`input-${currentKey}`}
                                                 type="text"
                                                 autoComplete="off"
-                                                className={`dictation-input ${isCorrect ? 'correct' : ''} ${isIncorrect ? 'incorrect' : ''}`}
+                                                // Apply 'dictation-no-border' if it is punctuation
+                                                className={`dictation-input ${isPunctuation ? 'dictation-no-border' : ''} ${isCorrect ? 'correct' : ''} ${isIncorrect ? 'incorrect' : ''}`}
                                                 value={val}
                                                 onChange={handleChange}
                                                 onKeyDown={handleKeyDown}
@@ -1135,12 +1143,12 @@ const shareCollection = async (emailToInvite) => {
                                         );
                                     })}
 
-                                    {/* Render Space Input (if not last word) */}
+                                    {/* Space Input (Invisible but functional) */}
                                     {!isLastWord && (
                                         (() => {
                                             const spaceKey = `${wordIdx}_space`;
                                             const val = dictationValues[spaceKey] || '';
-                                            const isCorrect = val === ' '; // Strictly check for space
+                                            const isCorrect = val === ' ';
                                             const isIncorrect = dictationChecked && val && !isCorrect;
 
                                             return (
@@ -1154,14 +1162,12 @@ const shareCollection = async (emailToInvite) => {
                                                     onChange={(e) => {
                                                         const inputVal = e.target.value.slice(-1);
                                                         setDictationValues(p => ({ ...p, [spaceKey]: inputVal }));
-                                                        // If they typed a space (or any char), move to next word start
                                                         if (inputVal) {
                                                             document.getElementById(`input-${wordIdx + 1}_0`)?.focus();
                                                         }
                                                     }}
                                                     onKeyDown={(e) => {
                                                         if (e.key === 'Backspace' && !val) {
-                                                            // Go back to last char of current word
                                                             document.getElementById(`input-${wordIdx}_${word.length - 1}`)?.focus();
                                                         }
                                                     }}
@@ -1175,7 +1181,7 @@ const shareCollection = async (emailToInvite) => {
                     </div>
                 );
             };
-
+            
             const loadSession = (item) => { 
                 let content = item.content || [];
                 if (typeof content === 'string') {
