@@ -758,13 +758,29 @@ const shareCollection = async (emailToInvite) => {
             };
 
             const handleTimeUpdate = (t) => {
-                setCurrentTime(t);
-                // FIX: Use REF.current to always get the freshest stop time, avoiding stale closures
+                // 1. Handle "Stop at End of Sentence" logic
+                // We check this BEFORE updating state to prevent the UI from flashing the next sentence.
                 if (stopAtTimeRef.current !== null && t >= stopAtTimeRef.current) {
                     setIsPlaying(false);
+                    
+                    // Snap back slightly (0.1s) to ensure the UI stays highlighted on the CURRENT sentence
+                    // instead of drifting into the next one.
+                    const safeEndTime = Math.max(0, stopAtTimeRef.current - 0.1);
+                    setCurrentTime(safeEndTime); 
+                    
+                    // Force the audio player to sync to this new time
+                    setSeekTrigger(prev => prev + 1); 
+                    
                     stopAtTimeRef.current = null;
+                    return; // Exit early
                 }
+
+                // 2. Normal Time Update
+                setCurrentTime(t);
+                
+                // 3. Loop Logic (Existing)
                 if (loopRange && isPlaying && t >= loopRange.end) {
+                    setCurrentTime(loopRange.start); // Ensure we actually loop back to start
                     setSeekTrigger(prev => prev + 1);
                 }
             };
