@@ -1125,11 +1125,15 @@ const shareCollection = async (emailToInvite) => {
                                             setDictationValues(p => ({ ...p, [currentKey]: inputVal }));
 
                                             if (inputVal) {
-                                                if (charIdx < word.length - 1) {
-                                                    document.getElementById(`input-${wordIdx}_${charIdx + 1}`)?.focus();
-                                                } else if (!isLastWord) {
-                                                    document.getElementById(`input-${wordIdx}_space`)?.focus();
-                                                }
+                                                // FIX: Use setTimeout to prevent double-typing bug
+                                                // This ensures the keystroke is finished before focus moves
+                                                setTimeout(() => {
+                                                    if (charIdx < word.length - 1) {
+                                                        document.getElementById(`input-${wordIdx}_${charIdx + 1}`)?.focus();
+                                                    } else if (!isLastWord) {
+                                                        document.getElementById(`input-${wordIdx}_space`)?.focus();
+                                                    }
+                                                }, 0);
                                             }
                                         };
 
@@ -1178,7 +1182,10 @@ const shareCollection = async (emailToInvite) => {
                                                         const inputVal = e.target.value.slice(-1);
                                                         setDictationValues(p => ({ ...p, [spaceKey]: inputVal }));
                                                         if (inputVal) {
-                                                            document.getElementById(`input-${wordIdx + 1}_0`)?.focus();
+                                                            // FIX: Use setTimeout here as well
+                                                            setTimeout(() => {
+                                                                document.getElementById(`input-${wordIdx + 1}_0`)?.focus();
+                                                            }, 0);
                                                         }
                                                     }}
                                                     onKeyDown={(e) => {
