@@ -1025,21 +1025,53 @@ const shareCollection = async (emailToInvite) => {
             };
 
             const handleTranscriptSeek = (index) => {
+                // 1. Safety Checks
                 if (!transcript || transcript.length === 0) return;
-                const seg = transcript[index];
-                if (seg) { 
-                    setSeekTrigger(prev => prev + 1); 
-                    setCurrentTime(seg.start); 
-                    setIsPlaying(true); 
-                    stopAtTimeRef.current = seg.end; 
-                    
-                    // NEW: Mark this sentence as visited immediately
-                    setVisitedIndices(prev => {
-                        const newSet = new Set(prev);
-                        newSet.add(index);
-                        return newSet;
-                    });
+                if (index < 0 || index >= transcript.length) return;
+
+                const startSeg = transcript[index];
+                
+                // 2. Determine Target Duration based on Dropdown
+                let minDuration = 0;
+                switch (chunkSize) {
+                    case '5-8': minDuration = 5; break;
+                    case '15-18': minDuration = 15; break;
+                    case '30-35': minDuration = 30; break;
+                    case '60-65': minDuration = 60; break;
+                    default: minDuration = 0; // 'single' means stop immediately
                 }
+
+                // 3. Calculate End Point
+                // We loop forward from the current sentence adding up time until we hit the target.
+                let endIndex = index;
+                for (let i = index; i < transcript.length; i++) {
+                    const currentSeg = transcript[i];
+                    const currentDuration = currentSeg.end - startSeg.start;
+                    
+                    endIndex = i; // This sentence is part of the chunk
+                    
+                    // If we have played enough seconds, stop adding sentences
+                    if (currentDuration >= minDuration) break;
+                }
+
+                const endSeg = transcript[endIndex];
+
+                // 4. Start Playback
+                setSeekTrigger(prev => prev + 1); 
+                setCurrentTime(startSeg.start); 
+                setIsPlaying(true); 
+                
+                // CRITICAL FIX: Stop at the end of the *calculated chunk*, not just the current sentence
+                stopAtTimeRef.current = endSeg.end; 
+                
+                // 5. Update Progress (Mark ALL sentences in this chunk as 'visited')
+                setVisitedIndices(prev => {
+                    const newSet = new Set(prev);
+                    for (let i = index; i <= endIndex; i++) {
+                        newSet.add(i);
+                    }
+                    return newSet;
+                });
             };
 
             const handleSidebarClick = (e, idx) => {
