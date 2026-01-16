@@ -89,7 +89,7 @@
             Repeat, Mic, Volume2, User, LogOut, Loader2, X, Database, Save, AlertCircle, 
             CheckCircle2, ArrowRight, Music, KeyRound, AlertTriangle, Trash2, SkipBack, 
             SkipForward, RefreshCw, PenTool, BookOpen, Layers, Square, Circle, Eye, 
-            Book, Languages, Plus, Wand2, Check, ListChecks, Share2, Sparkles, Pencil, Clock, MoveRight
+            Book, Languages, Plus, Wand2, Check, ListChecks, Share2, Sparkles, Pencil, Clock, MoveRight, EyeOff
         } from 'https://esm.sh/lucide-react@0.344.0?deps=react@18.3.1';
 
         const SUPABASE_URL = 'https://tnwtvxmbjwbgiwruttju.supabase.co';
@@ -548,6 +548,7 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
             const [manualEndTime, setManualEndTime] = useState("");
             const [shiftFollowing, setShiftFollowing] = useState(false);
             const [isSavingManual, setIsSavingManual] = useState(false);
+            const [showShadowingContent, setShowShadowingContent] = useState(true);
             
             // --- NEW: SUMMARY FEATURE STATE ---
             const [visitedIndices, setVisitedIndices] = useState(new Set());
@@ -1590,16 +1591,96 @@ const shareCollection = async (emailToInvite) => {
                                                 <div className="p-6 min-h-[400px]">
                                                     {/* --- SHADOWING TAB --- */}
                                                     {activeTab === 'Shadowing' && (
-                                                        <div className="space-y-8 fade-in">
-                                                            <div className="flex flex-col space-y-4"><div className="flex items-center justify-between px-1"><label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2"><Layers size={12} /> Practice chunk size</label><select value={chunkSize} onChange={(e) => setChunkSize(e.target.value)} className="text-xs font-bold border-none bg-gray-50 rounded-lg px-2 py-1 outline-none"><option value="single">Single sentence</option><option value="5-8">5-8 seconds</option><option value="15-18">15-18 seconds</option><option value="30-35">30-35 seconds</option><option value="60-65">60-65 seconds</option></select></div>
-                                                                <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptSeek(activeIndex - 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptSeek(activeIndex + 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
+                                                        <div className="space-y-6 fade-in">
+                                                            {/* 1. CONTROLS & NAVIGATION */}
+                                                            <div className="flex flex-col space-y-4">
+                                                                <div className="flex items-center justify-between px-1">
+                                                                    <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                                                                        <Layers size={12} /> Practice chunk size
+                                                                    </label>
+                                                                    <select value={chunkSize} onChange={(e) => setChunkSize(e.target.value)} className="text-xs font-bold border-none bg-gray-50 rounded-lg px-2 py-1 outline-none">
+                                                                        <option value="single">Single sentence</option>
+                                                                        <option value="5-8">5-8 seconds</option>
+                                                                        <option value="15-18">15-18 seconds</option>
+                                                                        <option value="30-35">30-35 seconds</option>
+                                                                        <option value="60-65">60-65 seconds</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div className="grid grid-cols-3 gap-3">
+                                                                    <button onClick={() => handleTranscriptSeek(activeIndex - 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button>
+                                                                    <button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button>
+                                                                    <button onClick={() => handleTranscriptSeek(activeIndex + 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button>
+                                                                </div>
                                                             </div>
+
+                                                            {/* 2. NEW: TRANSCRIPT DISPLAY & TOGGLE */}
+                                                            <div className="space-y-4">
+                                                                {showShadowingContent && (
+                                                                    <div className="p-8 bg-gray-50 rounded-[2.5rem] border border-gray-100 min-h-[150px] flex flex-col items-center justify-center text-center transition-all animate-in fade-in slide-in-from-top-2">
+                                                                        {chunkSize === 'single' ? (
+                                                                            // MODE A: Single Sentence (Big Text)
+                                                                            <p className="text-xl font-semibold text-gray-900 leading-relaxed">
+                                                                                {transcript[activeIndex]?.text || <span className="text-gray-400 italic font-normal">Play audio to see text...</span>}
+                                                                            </p>
+                                                                        ) : (
+                                                                            // MODE B: Chunk/History Mode (List of all played sentences)
+                                                                            <div className="w-full space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar px-2">
+                                                                                {visitedIndices.size === 0 ? (
+                                                                                    <span className="text-gray-400 italic">Play audio to see transcript history...</span>
+                                                                                ) : (
+                                                                                    Array.from(visitedIndices).sort((a,b) => a-b).map(idx => (
+                                                                                        <p key={idx} className={`text-lg leading-relaxed transition-colors ${idx === activeIndex ? 'font-bold text-gray-900' : 'text-gray-400'}`}>
+                                                                                            {transcript[idx]?.text}
+                                                                                        </p>
+                                                                                    ))
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                                
+                                                                {/* Hide/Show Button */}
+                                                                <div className="flex justify-center">
+                                                                    <button 
+                                                                        onClick={() => setShowShadowingContent(!showShadowingContent)} 
+                                                                        className="px-6 py-2.5 bg-white border border-gray-200 text-gray-600 font-bold text-xs uppercase rounded-full hover:bg-gray-50 transition-all flex items-center gap-2 shadow-sm hover:shadow-md"
+                                                                    >
+                                                                        {showShadowingContent ? <><EyeOff size={14} /> Hide Transcript</> : <><Eye size={14} /> Show Transcript</>}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* 3. RECORDING PANEL (Unchanged) */}
                                                             <div className="p-6 bg-gray-50 rounded-3xl border border-gray-100 space-y-4">
                                                                 <div className="flex items-center justify-between"><h4 className="text-sm font-bold text-gray-600 flex items-center gap-2"><Mic size={16} /> Voice record</h4></div>
-                                                                <div className="flex items-center gap-3">{!isRecording ? <button onClick={startRecording} className="flex-1 flex items-center justify-center gap-2 py-3 bg-white border border-gray-200 text-gray-700 font-bold text-xs uppercase rounded-xl hover:bg-gray-100 transition-all"><Circle size={12} className="text-red-500 fill-current" /> Start recording</button> : <button onClick={stopRecording} className="flex-1 flex items-center justify-center gap-2 py-3 bg-red-500 text-white font-bold text-xs uppercase rounded-xl hover:bg-red-600 transition-all animate-pulse"><Square size={12} className="fill-current" /> Stop recording</button>}{recordedBlob && !isRecording && (<><button onClick={() => { const url = URL.createObjectURL(recordedBlob); new Audio(url).play(); }} className="p-3 bg-white border border-gray-200 rounded-xl hover:bg-gray-100"><Play size={16} className="text-black" /></button><button onClick={saveRecording} disabled={isSavingRecord} className="px-5 py-3 bg-black text-white font-bold text-xs uppercase rounded-xl flex items-center gap-2">{isSavingRecord ? <Spinner /> : <Save size={16} />} Save</button></>)}</div>
+                                                                <div className="flex items-center gap-3">
+                                                                    {!isRecording ? (
+                                                                        <button onClick={startRecording} className="flex-1 flex items-center justify-center gap-2 py-3 bg-white border border-gray-200 text-gray-700 font-bold text-xs uppercase rounded-xl hover:bg-gray-100 transition-all"><Circle size={12} className="text-red-500 fill-current" /> Start recording</button>
+                                                                    ) : (
+                                                                        <button onClick={stopRecording} className="flex-1 flex items-center justify-center gap-2 py-3 bg-red-500 text-white font-bold text-xs uppercase rounded-xl hover:bg-red-600 transition-all animate-pulse"><Square size={12} className="fill-current" /> Stop recording</button>
+                                                                    )}
+                                                                    {recordedBlob && !isRecording && (
+                                                                        <>
+                                                                            <button onClick={() => { const url = URL.createObjectURL(recordedBlob); new Audio(url).play(); }} className="p-3 bg-white border border-gray-200 rounded-xl hover:bg-gray-100"><Play size={16} className="text-black" /></button>
+                                                                            <button onClick={saveRecording} disabled={isSavingRecord} className="px-5 py-3 bg-black text-white font-bold text-xs uppercase rounded-xl flex items-center gap-2">{isSavingRecord ? <Spinner /> : <Save size={16} />} Save</button>
+                                                                        </>
+                                                                    )}
+                                                                </div>
                                                                 
-                                                                {/* FILTER: Hide 'Summary' recordings from this main list */}
-                                                                <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar pt-2">{recordingsList.filter(r => !r.title.startsWith('Summary -')).map(rec => (<div key={rec.id} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl shadow-sm"><div className="flex items-center gap-3"><button onClick={() => { new Audio(rec.file_url).play(); }} className="p-2 bg-gray-50 rounded-lg hover:bg-gray-100"><Play size={12} className="text-black" /></button><div className="flex flex-col"><span className="text-[10px] font-bold text-gray-800 truncate max-w-[150px]">{rec.title}</span><span className="text-[9px] text-gray-400">{new Date(rec.created_at).toLocaleTimeString()}</span></div></div><button onClick={() => deleteRecording(rec.id)} className="p-2 text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={14} /></button></div>))}</div>
+                                                                <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar pt-2">
+                                                                    {recordingsList.filter(r => !r.title.startsWith('Summary -')).map(rec => (
+                                                                        <div key={rec.id} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
+                                                                            <div className="flex items-center gap-3">
+                                                                                <button onClick={() => { new Audio(rec.file_url).play(); }} className="p-2 bg-gray-50 rounded-lg hover:bg-gray-100"><Play size={12} className="text-black" /></button>
+                                                                                <div className="flex flex-col">
+                                                                                    <span className="text-[10px] font-bold text-gray-800 truncate max-w-[150px]">{rec.title}</span>
+                                                                                    <span className="text-[9px] text-gray-400">{new Date(rec.created_at).toLocaleTimeString()}</span>
+                                                                                </div>
+                                                                            </div>
+                                                                            <button onClick={() => deleteRecording(rec.id)} className="p-2 text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     )}
