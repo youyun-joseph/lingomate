@@ -383,12 +383,13 @@ Output JSON:` }];
         const fetchMeaningAndGrammar = async (apiKey, sentence) => {
             const effectiveKey = apiKey || DEFAULT_API_KEY;
             const body = {
-                // UPDATE: Request 3 specific parts in the JSON prompt
-                contents: [{ parts: [{ text: `Analyze: "${sentence}". 
+                contents: [{ parts: [{ text: `Analyze the following English source sentence: "${sentence}". 
 Provide:
-1. Chinese Translation (translation).
-2. Detailed explanation of meaning, nuance, and vocabulary (explanation).
-3. Key Grammar analysis (grammar).
+1. Natural Chinese Translation (translation).
+2. Explanation of the ENGLISH vocabulary, nuances, and meaning (explanation).
+3. Analysis of the ENGLISH grammar structures (grammar).
+
+IMPORTANT: Analyze the English source text, NOT the Chinese translation.
 ALL EXPLANATIONS MUST BE IN CHINESE SIMPLIFIED (简体中文). 
 Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "..." }.` }] }],
                 generationConfig: { responseMimeType: "application/json" }
@@ -1104,7 +1105,8 @@ const shareCollection = async (emailToInvite) => {
                 const words = activeSentence.split(' ');
 
                 return (
-                    <div className="flex flex-wrap gap-x-6 gap-y-8 justify-center w-full leading-loose">
+                    // UPDATE: Changed 'gap-x-6' to 'gap-x-1' to reduce space between words
+                    <div className="flex flex-wrap gap-x-1 gap-y-8 justify-center w-full leading-loose">
                         {words.map((word, wordIdx) => {
                             const isLastWord = wordIdx === words.length - 1;
                             
@@ -1125,9 +1127,7 @@ const shareCollection = async (emailToInvite) => {
                                             setDictationValues(p => ({ ...p, [currentKey]: inputVal }));
 
                                             if (inputVal) {
-                                                // FIX: Increased timeout to 50ms.
-                                                // 10ms was too fast for some browsers, causing the keypress
-                                                // to "bleed" into the next input.
+                                                // Robust 50ms delay to prevent double-typing
                                                 setTimeout(() => {
                                                     let nextElement = null;
                                                     
@@ -1141,7 +1141,7 @@ const shareCollection = async (emailToInvite) => {
                                                         nextElement.focus();
                                                         nextElement.select(); 
                                                     }
-                                                }, 50);
+                                                }, 80);
                                             }
                                         };
 
@@ -1196,14 +1196,13 @@ const shareCollection = async (emailToInvite) => {
                                                         const inputVal = e.target.value.slice(-1);
                                                         setDictationValues(p => ({ ...p, [spaceKey]: inputVal }));
                                                         if (inputVal) {
-                                                            // FIX: Increased timeout to 50ms here as well
                                                             setTimeout(() => {
                                                                 const nextWordStart = document.getElementById(`input-${wordIdx + 1}_0`);
                                                                 if (nextWordStart) {
                                                                     nextWordStart.focus();
                                                                     nextWordStart.select();
                                                                 }
-                                                            }, 50);
+                                                            }, 80);
                                                         }
                                                     }}
                                                     onKeyDown={(e) => {
