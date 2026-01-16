@@ -1125,8 +1125,9 @@ const shareCollection = async (emailToInvite) => {
                                             setDictationValues(p => ({ ...p, [currentKey]: inputVal }));
 
                                             if (inputVal) {
-                                                // FIX: Increased timeout to 10ms to ensure the browser event 
-                                                // loop completely clears the keystroke before moving focus.
+                                                // FIX: Increased timeout to 50ms.
+                                                // 10ms was too fast for some browsers, causing the keypress
+                                                // to "bleed" into the next input.
                                                 setTimeout(() => {
                                                     let nextElement = null;
                                                     
@@ -1138,16 +1139,15 @@ const shareCollection = async (emailToInvite) => {
                                                     
                                                     if (nextElement) {
                                                         nextElement.focus();
-                                                        // Optional: Select text so typing overwrites if backtracking
                                                         nextElement.select(); 
                                                     }
-                                                }, 10);
+                                                }, 50);
                                             }
                                         };
 
                                         const handleKeyDown = (e) => {
                                             if (e.key === 'Backspace' && !val) {
-                                                e.preventDefault(); // Prevent browser back navigation
+                                                e.preventDefault(); 
                                                 if (charIdx > 0) {
                                                     const prev = document.getElementById(`input-${wordIdx}_${charIdx - 1}`);
                                                     if (prev) { prev.focus(); prev.select(); }
@@ -1166,7 +1166,6 @@ const shareCollection = async (emailToInvite) => {
                                                 id={`input-${currentKey}`}
                                                 type="text"
                                                 autoComplete="off"
-                                                // Apply 'dictation-no-border' if it is punctuation
                                                 className={`dictation-input ${isPunctuation ? 'dictation-no-border' : ''} ${isCorrect ? 'correct' : ''} ${isIncorrect ? 'incorrect' : ''}`}
                                                 value={val}
                                                 onChange={handleChange}
@@ -1197,13 +1196,14 @@ const shareCollection = async (emailToInvite) => {
                                                         const inputVal = e.target.value.slice(-1);
                                                         setDictationValues(p => ({ ...p, [spaceKey]: inputVal }));
                                                         if (inputVal) {
+                                                            // FIX: Increased timeout to 50ms here as well
                                                             setTimeout(() => {
                                                                 const nextWordStart = document.getElementById(`input-${wordIdx + 1}_0`);
                                                                 if (nextWordStart) {
                                                                     nextWordStart.focus();
                                                                     nextWordStart.select();
                                                                 }
-                                                            }, 10);
+                                                            }, 50);
                                                         }
                                                     }}
                                                     onKeyDown={(e) => {
