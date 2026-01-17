@@ -84,7 +84,7 @@
         import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
         import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
         import { 
-            Play, Pause, ChevronRight, ChevronLeft, 
+            Play, Pause, ChevronRight, ChevronLeft, ChevronDown,
             Upload, FileText, History, Settings, 
             Repeat, Mic, Volume2, User, LogOut, Loader2, X, Database, Save, AlertCircle, 
             CheckCircle2, ArrowRight, Music, KeyRound, AlertTriangle, Trash2, SkipBack, 
@@ -470,7 +470,17 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
             const [isVocabOpen, setIsVocabOpen] = useState(false);
             const [isReplaceConfirmOpen, setIsReplaceConfirmOpen] = useState(false);
 
-            const [uploadLevel, setUploadLevel] = useState('Level 1'); // Default level
+            const [uploadLevel, setUploadLevel] = useState('Level 1');
+            
+            // --- NEW: Collapsible Sidebar State ---
+            const [collapsedLevels, setCollapsedLevels] = useState({}); // Empty = All Expanded by default
+
+            const toggleLevel = (level) => {
+                setCollapsedLevels(prev => ({
+                    ...prev,
+                    [level]: !prev[level]
+                }));
+            };
 
             // --- RESPONSIVE STATE ---
         const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
@@ -1594,46 +1604,47 @@ const shareCollection = async (emailToInvite) => {
                             </div>
                             {/* NEW: Sidebar Grouped by Levels */}
                             <div className="flex-1 overflow-y-auto p-3 min-w-[320px] custom-scrollbar pb-20 space-y-6">
-                                {history.length === 0 && (
-                                    <div className="text-center p-8 opacity-20">
-                                        <Database className="w-8 h-8 mx-auto mb-2" />
-                                        <p className="text-xs font-semibold">No files saved</p>
-                                    </div>
-                                )}
+                                {history.length === 0 && <div className="text-center p-8 opacity-20"><Database className="w-8 h-8 mx-auto mb-2" /><p className="text-xs font-semibold">No files saved</p></div>}
                                 
                                 {['Level 1', 'Level 2', 'Level 3', 'Level 4'].map(level => {
-                                    // Filter files for this level (default to 'Level 1' if null)
                                     const levelFiles = history.filter(h => (h.level || 'Level 1') === level);
-                                    
-                                    // Optional: Hide empty levels (remove this line if you want to see empty headers)
                                     if (levelFiles.length === 0) return null;
 
+                                    // Check if this level is currently collapsed (default is false/undefined)
+                                    const isCollapsed = collapsedLevels[level];
+
                                     return (
-                                        <div key={level} className="fade-in">
-                                            {/* Level Header */}
-                                            <h4 className="px-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-1 opacity-70 border-b border-gray-100 pb-1 mx-1">
-                                                <Layers size={10} /> {level}
-                                            </h4>
+                                        <div key={level} className="fade-in mb-2">
+                                            {/* Clickable Toggle Header */}
+                                            <button 
+                                                onClick={() => toggleLevel(level)}
+                                                className="w-full px-2 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center justify-between hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-all border-b border-gray-100 mb-2 mx-1"
+                                            >
+                                                <span className="flex items-center gap-2">
+                                                    <Layers size={10} /> {level}
+                                                </span>
+                                                {/* Rotate Icon based on state */}
+                                                {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                                            </button>
                                             
-                                            {/* Files in this Level */}
-                                            <div className="space-y-2">
-                                                {levelFiles.map(item => (
-                                                    <div key={item.id} onClick={() => loadSession(item)} className={`p-3 border rounded-xl cursor-pointer group relative transition-all shadow-sm hover:shadow-md ${source?.id === item.id ? 'bg-black text-white border-black' : 'bg-white border-gray-100 hover:border-black text-gray-800'}`}>
-                                                        <h3 className="font-bold text-xs truncate pr-12">{item.title}</h3>
-                                                        <div className={`flex justify-between items-center mt-2 text-[10px] font-medium ${source?.id === item.id ? 'opacity-70' : 'opacity-50'}`}>
-                                                            <span>{item.source_type}</span>
-                                                            <span>{new Date(item.created_at).toLocaleDateString()}</span>
+                                            {/* Collapsible File List */}
+                                            {!isCollapsed && (
+                                                <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                                                    {levelFiles.map(item => (
+                                                        <div key={item.id} onClick={() => loadSession(item)} className={`p-3 border rounded-xl cursor-pointer group relative transition-all shadow-sm hover:shadow-md ${source?.id === item.id ? 'bg-black text-white border-black' : 'bg-white border-gray-100 hover:border-black text-gray-800'}`}>
+                                                            <h3 className="font-bold text-xs truncate pr-12">{item.title}</h3>
+                                                            <div className={`flex justify-between items-center mt-2 text-[10px] font-medium ${source?.id === item.id ? 'opacity-70' : 'opacity-50'}`}>
+                                                                <span>{item.source_type}</span>
+                                                                <span>{new Date(item.created_at).toLocaleDateString()}</span>
+                                                            </div>
+                                                            <div className="absolute top-2.5 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                <button onClick={(e) => { e.stopPropagation(); handleShare(item); }} title="Share" className={`p-1 transition-colors ${source?.id === item.id ? 'text-gray-300 hover:text-white' : 'text-gray-400 hover:text-black'}`}><Share2 size={14} /></button>
+                                                                <button onClick={(e) => handleDeleteSession(e, item)} title="Delete" className={`p-1 transition-colors ${source?.id === item.id ? 'text-gray-300 hover:text-red-400' : 'text-gray-400 hover:text-red-500'}`}><Trash2 size={14} /></button>
+                                                            </div>
                                                         </div>
-                                                        
-                                                        {/* Action Buttons (Share & Delete) */}
-                                                        <div className="absolute top-2.5 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                            <button onClick={(e) => { e.stopPropagation(); handleShare(item); }} title="Share" className={`p-1 transition-colors ${source?.id === item.id ? 'text-gray-300 hover:text-white' : 'text-gray-400 hover:text-black'}`}><Share2 size={14} /></button>
-                                                            {/* Uses the safe delete function we added earlier */}
-                                                            <button onClick={(e) => handleDeleteSession(e, item)} title="Delete" className={`p-1 transition-colors ${source?.id === item.id ? 'text-gray-300 hover:text-red-400' : 'text-gray-400 hover:text-red-500'}`}><Trash2 size={14} /></button>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     );
                                 })}
@@ -1688,10 +1699,25 @@ const shareCollection = async (emailToInvite) => {
                                             <h3 className="font-bold text-lg text-gray-900 mb-2">Generate transcript</h3>
                                             <p className="text-sm text-gray-500 mb-8 max-w-xs leading-relaxed">Generate a sentence-by-sentence transcript to start practicing.</p>
                                             <div className="w-full space-y-4">
-                                                <input placeholder="Context (e.g. French Lesson)" className="w-full px-5 py-3.5 bg-gray-50 border-none rounded-2xl text-sm outline-none focus:ring-2 focus:ring-black transition-all" value={contextPrompt} onChange={e => setContextPrompt(e.target.value)} />
+                                                {/* NEW: Level Selector & Context Input Row */}
+                                                <div className="flex gap-2">
+                                                    {/* Level Dropdown */}
+                                                    <select 
+                                                        value={uploadLevel} 
+                                                        onChange={(e) => setUploadLevel(e.target.value)}
+                                                        className="bg-gray-50 border-none rounded-2xl px-4 py-3.5 text-sm font-bold outline-none focus:ring-2 focus:ring-black cursor-pointer text-gray-700 min-w-[100px]"
+                                                    >
+                                                        <option value="Level 1">Level 1</option>
+                                                        <option value="Level 2">Level 2</option>
+                                                        <option value="Level 3">Level 3</option>
+                                                        <option value="Level 4">Level 4</option>
+                                                    </select>
+                                                </div>
+
                                                 <button onClick={handleGenerate} disabled={isProcessing} className="w-full bg-black text-white py-4 font-bold rounded-2xl flex items-center justify-center gap-3 hover:bg-gray-800 disabled:opacity-50 transition-all shadow-md">
                                                     {isProcessing ? <Spinner /> : "Generate transcript"}
                                                 </button>
+                                                
                                                 {processingError && (
                                                     <div className="p-4 bg-red-50 text-red-600 text-xs font-bold rounded-xl border border-red-100 text-center animate-pulse">
                                                         Error: {processingError}
