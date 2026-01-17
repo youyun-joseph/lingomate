@@ -1138,68 +1138,88 @@ const shareCollection = async (emailToInvite) => {
             };
 
             const saveRecording = async () => {
-                if (!recordedBlob || !user) return;
-                setIsSavingRecord(true);
-                const path = `${user.id}/recordings/${Date.now()}.webm`;
-                const { error: uploadError } = await supabase.storage.from('media').upload(path, recordedBlob);
-                if (!uploadError) {
-                    const { data: urlData } = supabase.storage.from('media').getPublicUrl(path);
-                    await supabase.from('user_recordings').insert([{ user_id: user.id, title: `Recording ${new Date().toLocaleString()}`, file_url: urlData.publicUrl }]);
-                    fetchRecordings(user.id);
-                    setRecordedBlob(null);
+                if (!recordedBlob) return;
+                
+                // 1. Check Login
+                if (!user) {
+                    alert("Please sign in to save your recordings.");
+                    return;
                 }
-                setIsSavingRecord(false);
+                
+                setIsSavingRecord(true);
+                try {
+                    // 2. Upload to Supabase Storage
+                    const path = `${user.id}/recordings/${Date.now()}.webm`;
+                    const { error: uploadError } = await supabase.storage.from('media').upload(path, recordedBlob);
+                    if (uploadError) throw new Error("Upload failed: " + uploadError.message);
+                    
+                    // 3. Save Record to Database
+                    const { data: urlData } = supabase.storage.from('media').getPublicUrl(path);
+                    const { error: dbError } = await supabase.from('user_recordings').insert([{ 
+                        user_id: user.id, 
+                        title: `Recording ${new Date().toLocaleString()}`, 
+                        file_url: urlData.publicUrl 
+                    }]);
+                    if (dbError) throw new Error("Database save failed: " + dbError.message);
+
+                    // 4. Refresh List & Reset
+                    await fetchRecordings(user.id);
+                    setRecordedBlob(null);
+                    alert("Recording saved successfully!");
+                } catch (err) {
+                    console.error(err);
+                    alert("Error saving recording: " + err.message);
+                } finally {
+                    setIsSavingRecord(false);
+                }
             };
 
             // --- NEW: Save Summary (Max 2 files per audio) ---
             const saveSummaryRecording = async () => {
-                if (!recordedBlob || !user || !source) return;
-                setIsSavingRecord(true);
-                
-                const summaryPrefix = `Summary - ${source.title}`;
-                
-                // 1. Find existing summaries for THIS specific file
-                const existingSummaries = recordingsList.filter(r => r.title.startsWith(summaryPrefix));
-                
-                // 2. Enforce Limit: If we have 2 or more, delete the oldest one first
-                if (existingSummaries.length >= 2) {
-                    // Sort by date (oldest first)
-                    const sorted = existingSummaries.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-                    const oldest = sorted[0];
-                    await supabase.from('user_recordings').delete().eq('id', oldest.id);
+                if (!recordedBlob) return;
+                if (!user) {
+                    alert("Please sign in to save summaries.");
+                    return;
                 }
+                if (!source) return;
 
-                // 3. Upload and Save the New Recording
-                const path = `${user.id}/summaries/${Date.now()}.webm`;
-                const { error: uploadError } = await supabase.storage.from('media').upload(path, recordedBlob);
-                
-                if (!uploadError) {
+                setIsSavingRecord(true);
+                try {
+                    const summaryPrefix = `Summary - ${source.title}`;
+                    
+                    // 1. Enforce Limit (Max 2 summaries per file)
+                    const existingSummaries = recordingsList.filter(r => r.title.startsWith(summaryPrefix));
+                    if (existingSummaries.length >= 2) {
+                        // Delete the oldest one to make room
+                        const sorted = existingSummaries.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                        await supabase.from('user_recordings').delete().eq('id', sorted[0].id);
+                    }
+
+                    // 2. Upload
+                    const path = `${user.id}/summaries/${Date.now()}.webm`;
+                    const { error: uploadError } = await supabase.storage.from('media').upload(path, recordedBlob);
+                    if (uploadError) throw new Error("Upload failed: " + uploadError.message);
+                    
+                    // 3. Save to Database
                     const { data: urlData } = supabase.storage.from('media').getPublicUrl(path);
-                    await supabase.from('user_recordings').insert([{ 
+                    const { error: dbError } = await supabase.from('user_recordings').insert([{ 
                         user_id: user.id, 
-                        // Naming Convention: "Summary - Filename (Time)"
                         title: `${summaryPrefix} (${new Date().toLocaleTimeString()})`, 
                         file_url: urlData.publicUrl 
                     }]);
-                    fetchRecordings(user.id);
+                    if (dbError) throw new Error("Database save failed: " + dbError.message);
+
+                    // 4. Refresh
+                    await fetchRecordings(user.id);
                     setRecordedBlob(null);
-                    setIsRecording(false); // Stop recording mode
+                    setIsRecording(false); // Stop recording UI
+                    alert("Summary saved successfully!");
+                } catch (err) {
+                    console.error(err);
+                    alert("Failed to save summary: " + err.message);
+                } finally {
+                    setIsSavingRecord(false);
                 }
-                setIsSavingRecord(false);
-            };
-
-            const deleteRecording = async (id) => {
-                await supabase.from('user_recordings').delete().eq('id', id);
-                fetchRecordings(user.id);
-            };
-
-            const handleAuth = async (email, password, mode) => {
-                const { error } = (mode === 'signup') 
-                    ? await supabase.auth.signUp({ email, password }) 
-                    : await supabase.auth.signInWithPassword({ email, password });
-                if (error) return error.message;
-                setIsLoginOpen(false);
-                return null;
             };
 
             // UPDATE: Function now accepts 'sentenceIndex' to support multiple sentences in one view
