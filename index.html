@@ -469,6 +469,9 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
             const [isSettingsOpen, setIsSettingsOpen] = useState(false);
             const [isVocabOpen, setIsVocabOpen] = useState(false);
             const [isReplaceConfirmOpen, setIsReplaceConfirmOpen] = useState(false);
+
+            const [uploadLevel, setUploadLevel] = useState('Level 1'); // Default level
+
             // --- RESPONSIVE STATE ---
         const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
         const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 1024);
@@ -906,9 +909,12 @@ const shareCollection = async (emailToInvite) => {
                         // We save the CLEAN title (without timestamp) so the Sidebar looks nice
                         const cleanDisplayTitle = source.title.replace(/^\d{13}_/, '');
 
+                        // ... inside handleGenerate ...
+                        
                         const payload = { 
                             user_id: user.id, 
                             collection_id: activeCollectionId === 'default' ? null : activeCollectionId,
+                            level: uploadLevel, // <--- ADD THIS (We will define uploadLevel state next)
                             title: cleanDisplayTitle, 
                             source_type: source.mediaType, 
                             source_url: urlData.publicUrl, 
@@ -1586,18 +1592,51 @@ const shareCollection = async (emailToInvite) => {
                                     )}
                                 </div>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-3 space-y-2 min-w-[320px] custom-scrollbar">
-                                {history.length === 0 && <div className="text-center p-8 opacity-20"><Database className="w-8 h-8 mx-auto mb-2" /><p className="text-xs font-semibold">No files saved</p></div>}
-                                {history.map(item => (
-                                    <div key={item.id} onClick={() => loadSession(item)} className="p-3 border border-gray-100 hover:border-black rounded-xl cursor-pointer group relative transition-all bg-white shadow-sm hover:shadow-md">
-                                        <h3 className="font-bold text-xs truncate text-gray-800 pr-12">{item.title}</h3>
-                                        <div className="flex justify-between items-center mt-2 opacity-50 text-[10px] font-medium"><span>{item.source_type}</span><span>{new Date(item.created_at).toLocaleDateString()}</span></div>
-                                        <div className="absolute top-2.5 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button onClick={(e) => { e.stopPropagation(); handleShare(item); }} title="Share session" className="p-1 text-gray-400 transition-colors"><Share2 size={14} /></button>
-                                            <button onClick={(e) => handleDeleteSession(e, item)} title="Delete session" className="p-1 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
-                                        </div>
+                            {/* NEW: Sidebar Grouped by Levels */}
+                            <div className="flex-1 overflow-y-auto p-3 min-w-[320px] custom-scrollbar pb-20 space-y-6">
+                                {history.length === 0 && (
+                                    <div className="text-center p-8 opacity-20">
+                                        <Database className="w-8 h-8 mx-auto mb-2" />
+                                        <p className="text-xs font-semibold">No files saved</p>
                                     </div>
-                                ))}
+                                )}
+                                
+                                {['Level 1', 'Level 2', 'Level 3', 'Level 4'].map(level => {
+                                    // Filter files for this level (default to 'Level 1' if null)
+                                    const levelFiles = history.filter(h => (h.level || 'Level 1') === level);
+                                    
+                                    // Optional: Hide empty levels (remove this line if you want to see empty headers)
+                                    if (levelFiles.length === 0) return null;
+
+                                    return (
+                                        <div key={level} className="fade-in">
+                                            {/* Level Header */}
+                                            <h4 className="px-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-1 opacity-70 border-b border-gray-100 pb-1 mx-1">
+                                                <Layers size={10} /> {level}
+                                            </h4>
+                                            
+                                            {/* Files in this Level */}
+                                            <div className="space-y-2">
+                                                {levelFiles.map(item => (
+                                                    <div key={item.id} onClick={() => loadSession(item)} className={`p-3 border rounded-xl cursor-pointer group relative transition-all shadow-sm hover:shadow-md ${source?.id === item.id ? 'bg-black text-white border-black' : 'bg-white border-gray-100 hover:border-black text-gray-800'}`}>
+                                                        <h3 className="font-bold text-xs truncate pr-12">{item.title}</h3>
+                                                        <div className={`flex justify-between items-center mt-2 text-[10px] font-medium ${source?.id === item.id ? 'opacity-70' : 'opacity-50'}`}>
+                                                            <span>{item.source_type}</span>
+                                                            <span>{new Date(item.created_at).toLocaleDateString()}</span>
+                                                        </div>
+                                                        
+                                                        {/* Action Buttons (Share & Delete) */}
+                                                        <div className="absolute top-2.5 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <button onClick={(e) => { e.stopPropagation(); handleShare(item); }} title="Share" className={`p-1 transition-colors ${source?.id === item.id ? 'text-gray-300 hover:text-white' : 'text-gray-400 hover:text-black'}`}><Share2 size={14} /></button>
+                                                            {/* Uses the safe delete function we added earlier */}
+                                                            <button onClick={(e) => handleDeleteSession(e, item)} title="Delete" className={`p-1 transition-colors ${source?.id === item.id ? 'text-gray-300 hover:text-red-400' : 'text-gray-400 hover:text-red-500'}`}><Trash2 size={14} /></button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </aside>
 
