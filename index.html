@@ -1137,6 +1137,46 @@ const shareCollection = async (emailToInvite) => {
                 });
             };
 
+            const handleDeleteSession = async (e, item) => {
+                e.stopPropagation();
+                if (!confirm(`Are you sure you want to delete "${item.title}"?`)) return;
+
+                // 1. Delete the actual audio file from Storage
+                if (item.source_url) {
+                    try {
+                        // Extract the path after '/media/'
+                        const urlParts = item.source_url.split('/media/');
+                        if (urlParts.length > 1) {
+                            // Decode to handle spaces/symbols and remove query params
+                            const storagePath = decodeURIComponent(urlParts[1]).split('?')[0];
+                            
+                            const { error: storageError } = await supabase.storage.from('media').remove([storagePath]);
+                            if (storageError) {
+                                console.warn("Storage file not found or already deleted:", storageError);
+                            } else {
+                                console.log("Successfully deleted storage file:", storagePath);
+                            }
+                        }
+                    } catch (err) {
+                        console.error("Error parsing storage URL during delete:", err);
+                    }
+                }
+
+                // 2. Delete the Database Record
+                const { error } = await supabase.from('transcripts').delete().eq('id', item.id);
+
+                if (error) {
+                    alert("Failed to delete session: " + error.message);
+                } else {
+                    // 3. Update UI
+                    fetchHistory();
+                    // If the user deleted the currently playing file, close the player
+                    if (source && source.id === item.id) {
+                        setSource(null);
+                    }
+                }
+            };
+
             const handleTranscriptSeek = (index) => {
                 // 1. Safety Checks
                 if (!transcript || transcript.length === 0) return;
@@ -1554,7 +1594,7 @@ const shareCollection = async (emailToInvite) => {
                                         <div className="flex justify-between items-center mt-2 opacity-50 text-[10px] font-medium"><span>{item.source_type}</span><span>{new Date(item.created_at).toLocaleDateString()}</span></div>
                                         <div className="absolute top-2.5 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                             <button onClick={(e) => { e.stopPropagation(); handleShare(item); }} title="Share session" className="p-1 text-gray-400 transition-colors"><Share2 size={14} /></button>
-                                            <button onClick={(e) => { e.stopPropagation(); supabase.from('transcripts').delete().eq('id', item.id).then(() => fetchHistory()); }} title="Delete session" className="p-1 text-gray-400 transition-colors"><Trash2 size={14} /></button>
+                                            <button onClick={(e) => handleDeleteSession(e, item)} title="Delete session" className="p-1 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
                                         </div>
                                     </div>
                                 ))}
