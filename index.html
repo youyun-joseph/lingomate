@@ -547,6 +547,8 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
                 };
             }, []);
 
+            const saveLockRef = useRef(false); // Prevents double-clicking
+
             // Re-analysis State (AI)
             const [correctionHint, setCorrectionHint] = useState("");
             const [isReAnalyzing, setIsReAnalyzing] = useState(false);
@@ -1184,61 +1186,76 @@ const shareCollection = async (emailToInvite) => {
         };
 
             const saveRecording = async () => {
-            if (!recordedBlob) return;
+                if (!recordedBlob) return;
+                
+                // 1. INSTANT LOCK: Prevent double-clicks immediately
+                if (saveLockRef.current) return; 
+                saveLockRef.current = true;
+                
+                // 2. Check Login
+                if (!user) {
+                    alert("Please sign in to save your recordings.");
+                    saveLockRef.current = false; // Unlock
+                    return;
+                }
+                
+                setIsSavingRecord(true); // Update UI (Show spinner)
 
-            // 1. Check Login
-            if (!user) {
-                alert("Please sign in to save your recordings.");
-                return;
-            }
+                try {
+                    let title = `Recording ${new Date().toLocaleString()}`;
+                    const isShadowing = activeTab === 'Shadowing' && source;
+                    const shadowingPrefix = isShadowing ? `Shadowing - ${source.title} - S${activeIndex} -` : null;
 
-            setIsSavingRecord(true);
-            try {
-                let title = `Recording ${new Date().toLocaleString()}`;
+                    // 3. Upload to Supabase Storage
+                    const path = `${user.id}/recordings/${Date.now()}.webm`;
+                    const { error: uploadError } = await supabase.storage.from('media').upload(path, recordedBlob);
+                    if (uploadError) throw new Error("Upload failed: " + uploadError.message);
+                    
+                    // 4. Generate Title
+                    if (isShadowing) {
+                        title = `${shadowingPrefix}${Date.now()}`;
+                    }
+                    
+                    // 5. Save Record to Database
+                    const { data: urlData } = supabase.storage.from('media').getPublicUrl(path);
+                    const { error: dbError } = await supabase.from('user_recordings').insert([{ 
+                        user_id: user.id, 
+                        title: title, 
+                        file_url: urlData.publicUrl 
+                    }]);
+                    if (dbError) throw new Error("Database save failed: " + dbError.message);
 
-                // --- NEW: Shadowing Limit Logic (2 per sentence) ---
-                if (activeTab === 'Shadowing' && source) {
-                    // Create a specific prefix: "Shadowing - Title - S[Index] -"
-                    const prefix = `Shadowing - ${source.title} - S${activeIndex} -`;
+                    // 6. CLEANUP SWEEP (The Fix for Duplicates)
+                    // If this was a shadowing record, we now check the DB one last time to ensure
+                    // we didn't accidentally create duplicates. If we find them, we delete the OLD ones.
+                    if (isShadowing) {
+                        const { data: duplicates } = await supabase
+                            .from('user_recordings')
+                            .select('id, created_at')
+                            .eq('user_id', user.id)
+                            .ilike('title', `${shadowingPrefix}%`)
+                            .order('created_at', { ascending: false }); // Newest first
 
-                    // Find existing recordings for THIS sentence
-                    const existing = recordingsList.filter(r => r.title && r.title.startsWith(prefix));
-
-                    // If limit reached, delete the oldest one
-                    if (existing.length >= 2) {
-                        const sorted = existing.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-                        await supabase.from('user_recordings').delete().eq('id', sorted[0].id);
+                        // If we have more than 1 record, keep the first one (Newest), delete the rest
+                        if (duplicates && duplicates.length > 1) {
+                            const idsToDelete = duplicates.slice(1).map(r => r.id);
+                            await supabase.from('user_recordings').delete().in('id', idsToDelete);
+                            console.log("Cleanup: Deleted duplicate records:", idsToDelete);
+                        }
                     }
 
-                    // Set the new title with timestamp
-                    title = `${prefix}${Date.now()}`;
+                    // 7. Refresh List & Reset
+                    await fetchRecordings(user.id);
+                    setRecordedBlob(null);
+
+                } catch (err) {
+                    console.error(err);
+                    alert("Error saving recording: " + err.message);
+                } finally {
+                    setIsSavingRecord(false);
+                    saveLockRef.current = false; // Release the lock
                 }
-
-                // 2. Upload to Supabase Storage
-                const path = `${user.id}/recordings/${Date.now()}.webm`;
-                const { error: uploadError } = await supabase.storage.from('media').upload(path, recordedBlob);
-                if (uploadError) throw new Error("Upload failed: " + uploadError.message);
-
-                // 3. Save Record to Database
-                const { data: urlData } = supabase.storage.from('media').getPublicUrl(path);
-                const { error: dbError } = await supabase.from('user_recordings').insert([{ 
-                    user_id: user.id, 
-                    title: title, 
-                    file_url: urlData.publicUrl 
-                }]);
-                if (dbError) throw new Error("Database save failed: " + dbError.message);
-
-                // 4. Refresh List & Reset
-                await fetchRecordings(user.id);
-                setRecordedBlob(null);
-                // alert("Recording saved successfully!"); // <--- REMOVED POPUP as requested
-            } catch (err) {
-                console.error(err);
-                alert("Error saving recording: " + err.message);
-            } finally {
-                setIsSavingRecord(false);
-            }
-        };
+            };
 
             const loadSession = (item) => { 
                 let content = item.content || [];
@@ -1597,7 +1614,11 @@ const shareCollection = async (emailToInvite) => {
 
                                                             {/* 3. RECORDING PANEL (Unchanged) */}
                                                             <div className="p-6 bg-gray-50 rounded-3xl border border-gray-100 space-y-4">
-                                                                <div className="flex items-center justify-between"><h4 className="text-sm font-bold text-gray-600 flex items-center gap-2"><Mic size={16} /> Voice record</h4></div>
+                                                                <div className="flex items-center justify-between">
+                                                                    <h4 className="text-sm font-bold text-gray-600 flex items-center gap-2"><Mic size={16} /> Voice record</h4>
+                                                                    {/* NEW: User Awareness Label */}
+                                                                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Limit : 1 per sentence</span>
+                                                                </div>
                                                                 <div className="flex items-center gap-3">
                                                                     {!isRecording ? (
                                                                         <button onClick={startRecording} className="flex-1 flex items-center justify-center gap-2 py-3 bg-white border border-gray-200 text-gray-700 font-bold text-xs uppercase rounded-xl hover:bg-gray-100 transition-all"><Circle size={12} className="text-red-500 fill-current" /> Start recording</button>
