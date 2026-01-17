@@ -535,6 +535,18 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
             const [recordingsList, setRecordingsList] = useState([]);
             const [isSavingRecord, setIsSavingRecord] = useState(false);
 
+            // --- NEW: Persistent Microphone Stream Ref ---
+            const streamRef = useRef(null);
+
+            // Cleanup stream on component unmount
+            useEffect(() => {
+                return () => {
+                    if (streamRef.current) {
+                        streamRef.current.getTracks().forEach(track => track.stop());
+                    }
+                };
+            }, []);
+
             // Re-analysis State (AI)
             const [correctionHint, setCorrectionHint] = useState("");
             const [isReAnalyzing, setIsReAnalyzing] = useState(false);
@@ -773,6 +785,30 @@ const shareCollection = async (emailToInvite) => {
             const deleteVocabWord = async (id) => {
                 const { error } = await supabase.from('user_vocabulary').delete().eq('id', id);
                 if (!error) fetchVocabulary(user.id);
+            };
+
+            const handleAuth = async (email, password, mode) => {
+                try {
+                    if (mode === 'signup') {
+                        const { error } = await supabase.auth.signUp({
+                            email,
+                            password,
+                        });
+                        if (error) throw error;
+                        alert("Signup successful! Please check your email for the confirmation link.");
+                        setIsLoginOpen(false);
+                    } else {
+                        const { error } = await supabase.auth.signInWithPassword({
+                            email,
+                            password,
+                        });
+                        if (error) throw error;
+                        setIsLoginOpen(false);
+                    }
+                } catch (error) {
+                    console.error("Auth error:", error.message);
+                    return error.message;
+                }
             };
 
             const handleFileUpload = async (e) => {
@@ -1117,246 +1153,92 @@ const shareCollection = async (emailToInvite) => {
             };
 
             const startRecording = async () => {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    const newRecorder = new MediaRecorder(stream);
-                    const chunks = [];
-                    newRecorder.ondataavailable = (e) => chunks.push(e.data);
-                    newRecorder.onstop = () => setRecordedBlob(new Blob(chunks, { type: 'audio/webm' }));
-                    newRecorder.start();
-                    setRecorder(newRecorder);
-                    setIsRecording(true);
-                } catch (e) { console.error(e); }
-            };
-
-            const stopRecording = () => {
-                if (recorder) {
-                    recorder.stop();
-                    recorder.stream.getTracks().forEach(t => t.stop());
-                    setIsRecording(false);
+            try {
+                let stream = streamRef.current;
+                // Check if we have an active stream, if not, request it once
+                if (!stream || !stream.active || stream.getTracks().some(t => t.readyState === 'ended')) {
+                    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    streamRef.current = stream;
                 }
-            };
+
+                const newRecorder = new MediaRecorder(stream);
+                const chunks = [];
+                newRecorder.ondataavailable = (e) => chunks.push(e.data);
+                newRecorder.onstop = () => setRecordedBlob(new Blob(chunks, { type: 'audio/webm' }));
+                newRecorder.start();
+                setRecorder(newRecorder);
+                setIsRecording(true);
+            } catch (e) { 
+                console.error(e);
+                alert("Could not access microphone. Please check permissions.");
+            }
+        };
+
+        const stopRecording = () => {
+            if (recorder) {
+                recorder.stop();
+                // NOTE: We do NOT stop the stream tracks here anymore. 
+                // This keeps the permission 'alive' for the next recording.
+                setIsRecording(false);
+            }
+        };
 
             const saveRecording = async () => {
-                if (!recordedBlob) return;
-                
-                // 1. Check Login
-                if (!user) {
-                    alert("Please sign in to save your recordings.");
-                    return;
-                }
-                
-                setIsSavingRecord(true);
-                try {
-                    // 2. Upload to Supabase Storage
-                    const path = `${user.id}/recordings/${Date.now()}.webm`;
-                    const { error: uploadError } = await supabase.storage.from('media').upload(path, recordedBlob);
-                    if (uploadError) throw new Error("Upload failed: " + uploadError.message);
-                    
-                    // 3. Save Record to Database
-                    const { data: urlData } = supabase.storage.from('media').getPublicUrl(path);
-                    const { error: dbError } = await supabase.from('user_recordings').insert([{ 
-                        user_id: user.id, 
-                        title: `Recording ${new Date().toLocaleString()}`, 
-                        file_url: urlData.publicUrl 
-                    }]);
-                    if (dbError) throw new Error("Database save failed: " + dbError.message);
+            if (!recordedBlob) return;
 
-                    // 4. Refresh List & Reset
-                    await fetchRecordings(user.id);
-                    setRecordedBlob(null);
-                    alert("Recording saved successfully!");
-                } catch (err) {
-                    console.error(err);
-                    alert("Error saving recording: " + err.message);
-                } finally {
-                    setIsSavingRecord(false);
-                }
-            };
+            // 1. Check Login
+            if (!user) {
+                alert("Please sign in to save your recordings.");
+                return;
+            }
 
-            // --- NEW: Save Summary (Max 2 files per audio) ---
-            const saveSummaryRecording = async () => {
-                if (!recordedBlob) return;
-                if (!user) {
-                    alert("Please sign in to save summaries.");
-                    return;
-                }
-                if (!source) return;
+            setIsSavingRecord(true);
+            try {
+                let title = `Recording ${new Date().toLocaleString()}`;
 
-                setIsSavingRecord(true);
-                try {
-                    const summaryPrefix = `Summary - ${source.title}`;
-                    
-                    // 1. Enforce Limit (Max 2 summaries per file)
-                    const existingSummaries = recordingsList.filter(r => r.title.startsWith(summaryPrefix));
-                    if (existingSummaries.length >= 2) {
-                        // Delete the oldest one to make room
-                        const sorted = existingSummaries.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                // --- NEW: Shadowing Limit Logic (2 per sentence) ---
+                if (activeTab === 'Shadowing' && source) {
+                    // Create a specific prefix: "Shadowing - Title - S[Index] -"
+                    const prefix = `Shadowing - ${source.title} - S${activeIndex} -`;
+
+                    // Find existing recordings for THIS sentence
+                    const existing = recordingsList.filter(r => r.title && r.title.startsWith(prefix));
+
+                    // If limit reached, delete the oldest one
+                    if (existing.length >= 2) {
+                        const sorted = existing.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
                         await supabase.from('user_recordings').delete().eq('id', sorted[0].id);
                     }
 
-                    // 2. Upload
-                    const path = `${user.id}/summaries/${Date.now()}.webm`;
-                    const { error: uploadError } = await supabase.storage.from('media').upload(path, recordedBlob);
-                    if (uploadError) throw new Error("Upload failed: " + uploadError.message);
-                    
-                    // 3. Save to Database
-                    const { data: urlData } = supabase.storage.from('media').getPublicUrl(path);
-                    const { error: dbError } = await supabase.from('user_recordings').insert([{ 
-                        user_id: user.id, 
-                        title: `${summaryPrefix} (${new Date().toLocaleTimeString()})`, 
-                        file_url: urlData.publicUrl 
-                    }]);
-                    if (dbError) throw new Error("Database save failed: " + dbError.message);
-
-                    // 4. Refresh
-                    await fetchRecordings(user.id);
-                    setRecordedBlob(null);
-                    setIsRecording(false); // Stop recording UI
-                    alert("Summary saved successfully!");
-                } catch (err) {
-                    console.error(err);
-                    alert("Failed to save summary: " + err.message);
-                } finally {
-                    setIsSavingRecord(false);
+                    // Set the new title with timestamp
+                    title = `${prefix}${Date.now()}`;
                 }
-            };
 
-            // UPDATE: Function now accepts 'sentenceIndex' to support multiple sentences in one view
-            const renderDictationSlots = (sentenceIndex) => {
-                const activeSentence = transcript[sentenceIndex]?.text || "";
-                if (!activeSentence) return null;
-                
-                const words = activeSentence.split(' ');
+                // 2. Upload to Supabase Storage
+                const path = `${user.id}/recordings/${Date.now()}.webm`;
+                const { error: uploadError } = await supabase.storage.from('media').upload(path, recordedBlob);
+                if (uploadError) throw new Error("Upload failed: " + uploadError.message);
 
-                return (
-                    <div className="flex flex-wrap gap-x-1 gap-y-8 justify-center w-full leading-loose">
-                        {words.map((word, wordIdx) => {
-                            const isLastWord = wordIdx === words.length - 1;
-                            
-                            return (
-                                <div key={wordIdx} className="flex items-end flex-wrap">
-                                    {word.split('').map((char, charIdx) => {
-                                        // UPDATE: Key includes sentenceIndex to be unique across multiple sentences
-                                        const currentKey = `${sentenceIndex}-${wordIdx}_${charIdx}`;
-                                        const val = dictationValues[currentKey] || '';
-                                        
-                                        const isPunctuation = /^[.,!?;:'"()\-–—]+$/.test(char);
-                                        const isCorrect = val.toLowerCase() === char.toLowerCase();
-                                        const isIncorrect = dictationChecked && val && !isCorrect;
+                // 3. Save Record to Database
+                const { data: urlData } = supabase.storage.from('media').getPublicUrl(path);
+                const { error: dbError } = await supabase.from('user_recordings').insert([{ 
+                    user_id: user.id, 
+                    title: title, 
+                    file_url: urlData.publicUrl 
+                }]);
+                if (dbError) throw new Error("Database save failed: " + dbError.message);
 
-                                        const handleChange = (e) => {
-                                            if (inputLockRef.current) return;
-
-                                            const inputVal = e.target.value.slice(-1); 
-                                            setDictationValues(p => ({ ...p, [currentKey]: inputVal }));
-
-                                            if (inputVal) {
-                                                inputLockRef.current = true;
-                                                setTimeout(() => {
-                                                    let nextElement = null;
-                                                    
-                                                    // Logic to find next ID using sentenceIndex
-                                                    if (charIdx < word.length - 1) {
-                                                        nextElement = document.getElementById(`input-${sentenceIndex}-${wordIdx}_${charIdx + 1}`);
-                                                    } else if (!isLastWord) {
-                                                        nextElement = document.getElementById(`input-${sentenceIndex}-${wordIdx}_space`);
-                                                    }
-                                                    
-                                                    if (nextElement) {
-                                                        nextElement.focus();
-                                                        nextElement.select(); 
-                                                    }
-
-                                                    setTimeout(() => {
-                                                        inputLockRef.current = false;
-                                                    }, 50);
-                                                }, 10);
-                                            }
-                                        };
-
-                                        const handleKeyDown = (e) => {
-                                            if (e.key === 'Backspace' && !val) {
-                                                e.preventDefault(); 
-                                                if (charIdx > 0) {
-                                                    const prev = document.getElementById(`input-${sentenceIndex}-${wordIdx}_${charIdx - 1}`);
-                                                    if (prev) { prev.focus(); prev.select(); }
-                                                } else if (wordIdx > 0) {
-                                                    const prevSpace = document.getElementById(`input-${sentenceIndex}-${wordIdx - 1}_space`);
-                                                    if (prevSpace) { prevSpace.focus(); prevSpace.select(); }
-                                                }
-                                            }
-                                        };
-
-                                        return (
-                                            <input
-                                                key={charIdx}
-                                                id={`input-${currentKey}`} // Matches the new key format
-                                                type="text"
-                                                maxLength={1}
-                                                autoComplete="off"
-                                                className={`dictation-input ${isPunctuation ? 'dictation-no-border' : ''} ${isCorrect ? 'correct' : ''} ${isIncorrect ? 'incorrect' : ''}`}
-                                                value={val}
-                                                onChange={handleChange}
-                                                onKeyDown={handleKeyDown}
-                                                onFocus={(e) => e.target.select()}
-                                            />
-                                        );
-                                    })}
-
-                                    {/* Space Input */}
-                                    {!isLastWord && (
-                                        (() => {
-                                            const spaceKey = `${sentenceIndex}-${wordIdx}_space`;
-                                            const val = dictationValues[spaceKey] || '';
-                                            const isCorrect = val === ' ';
-                                            const isIncorrect = dictationChecked && val && !isCorrect;
-
-                                            return (
-                                                <input
-                                                    key="space"
-                                                    id={`input-${spaceKey}`}
-                                                    type="text"
-                                                    maxLength={1}
-                                                    autoComplete="off"
-                                                    className={`dictation-input dictation-space ${isCorrect ? 'correct' : ''} ${isIncorrect ? 'incorrect' : ''}`}
-                                                    value={val}
-                                                    onFocus={(e) => e.target.select()}
-                                                    onChange={(e) => {
-                                                        if (inputLockRef.current) return;
-
-                                                        const inputVal = e.target.value.slice(-1);
-                                                        setDictationValues(p => ({ ...p, [spaceKey]: inputVal }));
-                                                        
-                                                        if (inputVal) {
-                                                            inputLockRef.current = true;
-                                                            setTimeout(() => {
-                                                                const nextWordStart = document.getElementById(`input-${sentenceIndex}-${wordIdx + 1}_0`);
-                                                                if (nextWordStart) {
-                                                                    nextWordStart.focus();
-                                                                    nextWordStart.select();
-                                                                }
-                                                                setTimeout(() => { inputLockRef.current = false; }, 50);
-                                                            }, 10);
-                                                        }
-                                                    }}
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === 'Backspace' && !val) {
-                                                            e.preventDefault();
-                                                            const lastCharOfPrev = document.getElementById(`input-${sentenceIndex}-${wordIdx}_${word.length - 1}`);
-                                                            if (lastCharOfPrev) { lastCharOfPrev.focus(); lastCharOfPrev.select(); }
-                                                        }
-                                                    }}
-                                                />
-                                            );
-                                        })()
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                );
-            };
+                // 4. Refresh List & Reset
+                await fetchRecordings(user.id);
+                setRecordedBlob(null);
+                // alert("Recording saved successfully!"); // <--- REMOVED POPUP as requested
+            } catch (err) {
+                console.error(err);
+                alert("Error saving recording: " + err.message);
+            } finally {
+                setIsSavingRecord(false);
+            }
+        };
 
             const loadSession = (item) => { 
                 let content = item.content || [];
@@ -1730,20 +1612,29 @@ const shareCollection = async (emailToInvite) => {
                                                                     )}
                                                                 </div>
                                                                 
-                                                                <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar pt-2">
-                                                                    {recordingsList.filter(r => !r.title.startsWith('Summary -')).map(rec => (
-                                                                        <div key={rec.id} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
-                                                                            <div className="flex items-center gap-3">
-                                                                                <button onClick={() => { new Audio(rec.file_url).play(); }} className="p-2 bg-gray-50 rounded-lg hover:bg-gray-100"><Play size={12} className="text-black" /></button>
-                                                                                <div className="flex flex-col">
-                                                                                    <span className="text-[10px] font-bold text-gray-800 truncate max-w-[150px]">{rec.title}</span>
-                                                                                    <span className="text-[9px] text-gray-400">{new Date(rec.created_at).toLocaleTimeString()}</span>
-                                                                                </div>
+                                                                {/* Filter: Only show recordings for CURRENT SENTENCE in Shadowing */}
+                                                            <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar pt-2">
+                                                                {recordingsList.filter(r => {
+                                                                    // Match the specific prefix for this sentence
+                                                                    const prefix = `Shadowing - ${source?.title} - S${activeIndex} -`;
+                                                                    return r.title && r.title.startsWith(prefix);
+                                                                }).map(rec => (
+                                                                    <div key={rec.id} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
+                                                                        <div className="flex items-center gap-3">
+                                                                            <button onClick={() => { new Audio(rec.file_url).play(); }} className="p-2 bg-gray-50 rounded-lg hover:bg-gray-100"><Play size={12} className="text-black" /></button>
+                                                                            <div className="flex flex-col">
+                                                                                <span className="text-[10px] font-bold text-gray-800 truncate max-w-[150px]">Recording</span>
+                                                                                <span className="text-[9px] text-gray-400">{new Date(rec.created_at).toLocaleTimeString()}</span>
                                                                             </div>
-                                                                            <button onClick={() => deleteRecording(rec.id)} className="p-2 text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
                                                                         </div>
-                                                                    ))}
-                                                                </div>
+                                                                        <button onClick={() => deleteRecording(rec.id)} className="p-2 text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
+                                                                    </div>
+                                                                ))}
+                                                                {/* Show message if empty */}
+                                                                {recordingsList.filter(r => r.title && r.title.startsWith(`Shadowing - ${source?.title} - S${activeIndex} -`)).length === 0 && (
+                                                                    <div className="text-center py-4 text-xs text-gray-400 italic">No recordings for this sentence yet.</div>
+                                                                )}
+                                                            </div>
                                                             </div>
                                                         </div>
                                                     )}
