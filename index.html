@@ -838,13 +838,18 @@ const shareCollection = async (emailToInvite) => {
                     setTranscript(result);
                     
                     if (user) {
-                        // 2. SMART CLEANUP: Identify and remove old versions of this file
-                        // We normalize titles by removing the timestamp prefix (13 digits + underscore)
-                        // to recognize that "1768..._Song.mp3" is an old version of "Song.mp3"
-                        const normalizeTitle = (t) => t.replace(/^\d{13}_/, '');
-                        const currentNormalized = normalizeTitle(source.title);
+                        // 2. SMART CLEANUP: Identify and remove old versions
+                        // Helper: Normalizes titles so "123_Solid_Joys" matches "Solid Joys"
+                        const getComparisonName = (t) => {
+                            // Remove 13-digit timestamp prefix if present
+                            const noTimestamp = t.replace(/^\d{13}_/, '');
+                            // Sanitize to match file-system naming (underscores, lowercase)
+                            return sanitizeFilename(noTimestamp).toLowerCase();
+                        };
+                        
+                        const currentComparisonName = getComparisonName(source.title);
 
-                        // Fetch ALL transcripts for this user to check for duplicates
+                        // Fetch ALL transcripts to ensure we catch every variation
                         const { data: allUserTranscripts } = await supabase
                             .from('transcripts')
                             .select('id, title, source_url')
@@ -853,26 +858,27 @@ const shareCollection = async (emailToInvite) => {
                         let targetId = null;
 
                         if (allUserTranscripts) {
-                            // Find all entries that are "versions" of this file
+                            // Filter: Find all DB entries that "mean" the same file
                             const duplicates = allUserTranscripts.filter(t => {
-                                const tNormalized = normalizeTitle(t.title);
-                                return tNormalized === currentNormalized;
+                                return getComparisonName(t.title) === currentComparisonName;
                             });
 
                             if (duplicates.length > 0) {
-                                // We will keep the first ID to update, and delete the others
+                                // We will reuse the first ID found, and delete the rest
                                 targetId = duplicates[0].id;
 
                                 for (const entry of duplicates) {
-                                    // A. Delete the audio file from Storage
+                                    // A. Delete the actual audio file from Storage
                                     if (entry.source_url) {
                                         try {
                                             const urlParts = entry.source_url.split('/media/');
                                             if (urlParts.length > 1) {
                                                 // Decode to handle spaces/symbols correctly
                                                 const oldPath = decodeURIComponent(urlParts[1]);
-                                                await supabase.storage.from('media').remove([oldPath]);
-                                                console.log("Cleanup: Deleted old media file:", oldPath);
+                                                // Remove any query parameters
+                                                const cleanPath = oldPath.split('?')[0]; 
+                                                await supabase.storage.from('media').remove([cleanPath]);
+                                                console.log("Cleanup: Deleted old media file:", cleanPath);
                                             }
                                         } catch (cleanupErr) {
                                             console.warn("Failed to cleanup storage file:", cleanupErr);
@@ -887,8 +893,7 @@ const shareCollection = async (emailToInvite) => {
                             }
                         }
 
-                        // 3. Upload New File
-                        // We add a timestamp to the filename in Storage to prevent caching issues
+                        // 3. Upload New File (with unique timestamp to avoid caching)
                         const sanitizedTitle = sanitizeFilename(source.title);
                         const filePath = `${user.id}/${Date.now()}_${sanitizedTitle}`;
                         
@@ -898,13 +903,13 @@ const shareCollection = async (emailToInvite) => {
                         const { data: urlData } = supabase.storage.from('media').getPublicUrl(filePath);
 
                         // 4. Update Database
-                        // We save the CLEAN original title (without timestamp) so it looks nice in the sidebar
-                        const cleanTitle = normalizeTitle(source.title); 
+                        // We save the CLEAN title (without timestamp) so the Sidebar looks nice
+                        const cleanDisplayTitle = source.title.replace(/^\d{13}_/, '');
 
                         const payload = { 
                             user_id: user.id, 
                             collection_id: activeCollectionId === 'default' ? null : activeCollectionId,
-                            title: cleanTitle, // Save "Solid Joys.mp3", not "1768..._Solid Joys.mp3"
+                            title: cleanDisplayTitle, 
                             source_type: source.mediaType, 
                             source_url: urlData.publicUrl, 
                             content: result 
@@ -913,11 +918,11 @@ const shareCollection = async (emailToInvite) => {
                         if (targetId) {
                             // Update the existing record we kept
                             await supabase.from('transcripts').update(payload).eq('id', targetId);
-                            setSource(prev => ({...prev, id: targetId, title: cleanTitle}));
+                            setSource(prev => ({...prev, id: targetId, title: cleanDisplayTitle}));
                         } else {
                             // Insert a new record
                             const { data } = await supabase.from('transcripts').insert(payload).select().single();
-                            if(data) setSource(prev => ({...prev, id: data.id, title: cleanTitle}));
+                            if(data) setSource(prev => ({...prev, id: data.id, title: cleanDisplayTitle}));
                         }
                         
                         fetchHistory();
