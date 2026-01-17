@@ -833,16 +833,47 @@ const shareCollection = async (emailToInvite) => {
                 setIsProcessing(true);
                 setProcessingError(null);
                 try {
+                    // 1. Process Transcription (AI)
                     const result = await processTranscription(geminiKey, source.fileData, contextPrompt || source.title, source.duration || 0);
                     setTranscript(result);
+                    
                     if (user) {
+                        // 2. CLEANUP: Check if a session with this title already exists
+                        // If yes, delete the OLD audio file from storage to prevent duplicates
+                        const { data: existingEntry } = await supabase
+                            .from('transcripts')
+                            .select('source_url')
+                            .eq('user_id', user.id)
+                            .eq('title', source.title)
+                            .maybeSingle();
+
+                        if (existingEntry && existingEntry.source_url) {
+                            try {
+                                // Extract the path from the public URL (everything after /media/)
+                                const urlParts = existingEntry.source_url.split('/media/');
+                                if (urlParts.length > 1) {
+                                    const oldPath = urlParts[1];
+                                    await supabase.storage.from('media').remove([oldPath]);
+                                    console.log("Cleanup: Deleted old media file:", oldPath);
+                                }
+                            } catch (cleanupErr) {
+                                console.warn("Failed to cleanup old file, continuing...", cleanupErr);
+                            }
+                        }
+
+                        // 3. Upload New File
                         const sanitizedTitle = sanitizeFilename(source.title);
                         const filePath = `${user.id}/${Date.now()}_${sanitizedTitle}`;
-                        await supabase.storage.from('media').upload(filePath, source.fileData, { cacheControl: '3600', upsert: true });
+                        
+                        const { error: uploadError } = await supabase.storage.from('media').upload(filePath, source.fileData, { cacheControl: '3600', upsert: true });
+                        if (uploadError) throw uploadError;
+
                         const { data: urlData } = supabase.storage.from('media').getPublicUrl(filePath);
+
+                        // 4. Update Database (Upsert will replace the old DB record)
                         await supabase.from('transcripts').upsert({ 
                             user_id: user.id, 
-                            collection_id: activeCollectionId === 'default' ? null : activeCollectionId, // <--- This saves it to the folder
+                            collection_id: activeCollectionId === 'default' ? null : activeCollectionId,
                             title: source.title, 
                             source_type: source.mediaType, 
                             source_url: urlData.publicUrl, 
@@ -850,6 +881,7 @@ const shareCollection = async (emailToInvite) => {
                         }, { onConflict: 'user_id, title' }).select().single().then(({data}) => {
                             if(data) setSource(prev => ({...prev, id: data.id}));
                         });
+                        
                         fetchHistory();
                     }
                 } catch (err) { 
@@ -1281,7 +1313,7 @@ const shareCollection = async (emailToInvite) => {
                     saveLockRef.current = false; // Release lock
                 }
             };
-            
+
             const loadSession = (item) => { 
                 let content = item.content || [];
                 if (typeof content === 'string') {
