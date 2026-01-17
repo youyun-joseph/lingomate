@@ -838,45 +838,57 @@ const shareCollection = async (emailToInvite) => {
                     setTranscript(result);
                     
                     if (user) {
-                        // 2. CLEANUP: Robustly find and remove old versions
+                        // 2. SMART CLEANUP: Identify and remove old versions of this file
+                        // We normalize titles by removing the timestamp prefix (13 digits + underscore)
+                        // to recognize that "1768..._Song.mp3" is an old version of "Song.mp3"
+                        const normalizeTitle = (t) => t.replace(/^\d{13}_/, '');
+                        const currentNormalized = normalizeTitle(source.title);
+
+                        // Fetch ALL transcripts for this user to check for duplicates
+                        const { data: allUserTranscripts } = await supabase
+                            .from('transcripts')
+                            .select('id, title, source_url')
+                            .eq('user_id', user.id);
+
                         let targetId = null;
 
-                        // Find ALL entries with this title (in case duplicates exist)
-                        const { data: existingEntries } = await supabase
-                            .from('transcripts')
-                            .select('id, source_url')
-                            .eq('user_id', user.id)
-                            .eq('title', source.title);
+                        if (allUserTranscripts) {
+                            // Find all entries that are "versions" of this file
+                            const duplicates = allUserTranscripts.filter(t => {
+                                const tNormalized = normalizeTitle(t.title);
+                                return tNormalized === currentNormalized;
+                            });
 
-                        if (existingEntries && existingEntries.length > 0) {
-                            // Pick the first one to keep (we will update it), delete the rest
-                            targetId = existingEntries[0].id;
+                            if (duplicates.length > 0) {
+                                // We will keep the first ID to update, and delete the others
+                                targetId = duplicates[0].id;
 
-                            for (const entry of existingEntries) {
-                                // A. Delete the actual audio file from Storage
-                                if (entry.source_url) {
-                                    try {
-                                        const urlParts = entry.source_url.split('/media/');
-                                        if (urlParts.length > 1) {
-                                            // FIX: decodeURIComponent is required for filenames with spaces/symbols
-                                            const oldPath = decodeURIComponent(urlParts[1]);
-                                            await supabase.storage.from('media').remove([oldPath]);
-                                            console.log("Cleanup: Deleted old media file:", oldPath);
+                                for (const entry of duplicates) {
+                                    // A. Delete the audio file from Storage
+                                    if (entry.source_url) {
+                                        try {
+                                            const urlParts = entry.source_url.split('/media/');
+                                            if (urlParts.length > 1) {
+                                                // Decode to handle spaces/symbols correctly
+                                                const oldPath = decodeURIComponent(urlParts[1]);
+                                                await supabase.storage.from('media').remove([oldPath]);
+                                                console.log("Cleanup: Deleted old media file:", oldPath);
+                                            }
+                                        } catch (cleanupErr) {
+                                            console.warn("Failed to cleanup storage file:", cleanupErr);
                                         }
-                                    } catch (cleanupErr) {
-                                        console.warn("Failed to cleanup old file, continuing...", cleanupErr);
                                     }
-                                }
 
-                                // B. If this is a duplicate DB row (not the one we are keeping), delete it
-                                if (entry.id !== targetId) {
-                                    await supabase.from('transcripts').delete().eq('id', entry.id);
+                                    // B. Delete duplicate Database rows (except the one we reuse)
+                                    if (entry.id !== targetId) {
+                                        await supabase.from('transcripts').delete().eq('id', entry.id);
+                                    }
                                 }
                             }
                         }
 
                         // 3. Upload New File
-                        // We use a unique timestamp to avoid browser caching issues
+                        // We add a timestamp to the filename in Storage to prevent caching issues
                         const sanitizedTitle = sanitizeFilename(source.title);
                         const filePath = `${user.id}/${Date.now()}_${sanitizedTitle}`;
                         
@@ -886,23 +898,26 @@ const shareCollection = async (emailToInvite) => {
                         const { data: urlData } = supabase.storage.from('media').getPublicUrl(filePath);
 
                         // 4. Update Database
+                        // We save the CLEAN original title (without timestamp) so it looks nice in the sidebar
+                        const cleanTitle = normalizeTitle(source.title); 
+
                         const payload = { 
                             user_id: user.id, 
                             collection_id: activeCollectionId === 'default' ? null : activeCollectionId,
-                            title: source.title, 
+                            title: cleanTitle, // Save "Solid Joys.mp3", not "1768..._Solid Joys.mp3"
                             source_type: source.mediaType, 
                             source_url: urlData.publicUrl, 
                             content: result 
                         };
 
                         if (targetId) {
-                            // Update existing record
+                            // Update the existing record we kept
                             await supabase.from('transcripts').update(payload).eq('id', targetId);
-                            setSource(prev => ({...prev, id: targetId}));
+                            setSource(prev => ({...prev, id: targetId, title: cleanTitle}));
                         } else {
-                            // Insert new record
+                            // Insert a new record
                             const { data } = await supabase.from('transcripts').insert(payload).select().single();
-                            if(data) setSource(prev => ({...prev, id: data.id}));
+                            if(data) setSource(prev => ({...prev, id: data.id, title: cleanTitle}));
                         }
                         
                         fetchHistory();
