@@ -505,6 +505,31 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
             window.addEventListener('resize', handleResize);
             return () => window.removeEventListener('resize', handleResize);
         }, []);
+
+            // --- NEW: Keyboard Shortcuts (Space to Play/Pause) ---
+            useEffect(() => {
+                const handleKeyDown = (e) => {
+                    if (e.code === 'Space') {
+                        // 1. Check if user is typing in an input box or textarea
+                        const tag = document.activeElement.tagName.toLowerCase();
+                        const isInput = tag === 'input' || tag === 'textarea' || document.activeElement.isContentEditable;
+                        
+                        // 2. Only toggle play/pause if NOT typing
+                        if (!isInput) {
+                            e.preventDefault(); // Prevent page scrolling
+                            // Use functional update to get the latest state safely
+                            setIsPlaying(prev => !prev);
+                            
+                            // Optional: Reset "Stop at End" logic if user manually interferes
+                            if (stopAtTimeRef.current) stopAtTimeRef.current = null;
+                        }
+                    }
+                };
+
+                window.addEventListener('keydown', handleKeyDown);
+                return () => window.removeEventListener('keydown', handleKeyDown);
+            }, []);
+            
             const [fixPanelOpen, setFixPanelOpen] = useState(false);
             const [fixPanelMode, setFixPanelMode] = useState('ai'); // 'ai' or 'manual'
             const [userRole, setUserRole] = useState(null);
