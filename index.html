@@ -471,6 +471,43 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
             const [isReplaceConfirmOpen, setIsReplaceConfirmOpen] = useState(false);
 
             const [uploadLevel, setUploadLevel] = useState('Level 1');
+
+            // --- NEW: Playback State for Recordings ---
+            const [playbackState, setPlaybackState] = useState({ id: null, isPlaying: false });
+            const playbackAudioRef = useRef(null);
+
+            const togglePlayback = (url, id) => {
+                // 1. If clicking the SAME active recording -> Toggle Pause/Play
+                if (playbackState.id === id) {
+                    if (playbackState.isPlaying) {
+                        playbackAudioRef.current?.pause();
+                        setPlaybackState(prev => ({ ...prev, isPlaying: false }));
+                    } else {
+                        playbackAudioRef.current?.play();
+                        setPlaybackState(prev => ({ ...prev, isPlaying: true }));
+                    }
+                    return;
+                }
+
+                // 2. If clicking a DIFFERENT recording -> Stop old, Start new
+                if (playbackAudioRef.current) {
+                    playbackAudioRef.current.pause();
+                    playbackAudioRef.current.currentTime = 0;
+                }
+
+                const audio = new Audio(url);
+                playbackAudioRef.current = audio;
+                
+                // Reset state when audio finishes
+                audio.onended = () => setPlaybackState({ id: null, isPlaying: false });
+                
+                audio.play().catch(e => {
+                    console.error("Playback failed:", e);
+                    alert("Unable to play audio. Format might not be supported on this device.");
+                });
+                
+                setPlaybackState({ id, isPlaying: true });
+            };
             
             // --- NEW: Collapsible Sidebar State ---
             const [collapsedLevels, setCollapsedLevels] = useState({}); // Empty = All Expanded by default
@@ -529,7 +566,7 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
                 window.addEventListener('keydown', handleKeyDown);
                 return () => window.removeEventListener('keydown', handleKeyDown);
             }, []);
-            
+
             const [fixPanelOpen, setFixPanelOpen] = useState(false);
             const [fixPanelMode, setFixPanelMode] = useState('ai'); // 'ai' or 'manual'
             const [userRole, setUserRole] = useState(null);
@@ -1320,26 +1357,42 @@ const shareCollection = async (emailToInvite) => {
             };
 
             const startRecording = async () => {
-            try {
-                let stream = streamRef.current;
-                // Check if we have an active stream, if not, request it once
-                if (!stream || !stream.active || stream.getTracks().some(t => t.readyState === 'ended')) {
-                    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    streamRef.current = stream;
-                }
+                try {
+                    let stream = streamRef.current;
+                    // Check if we have an active stream, if not, request it once
+                    if (!stream || !stream.active || stream.getTracks().some(t => t.readyState === 'ended')) {
+                        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        streamRef.current = stream;
+                    }
 
-                const newRecorder = new MediaRecorder(stream);
-                const chunks = [];
-                newRecorder.ondataavailable = (e) => chunks.push(e.data);
-                newRecorder.onstop = () => setRecordedBlob(new Blob(chunks, { type: 'audio/webm' }));
-                newRecorder.start();
-                setRecorder(newRecorder);
-                setIsRecording(true);
-            } catch (e) { 
-                console.error(e);
-                alert("Could not access microphone. Please check permissions.");
-            }
-        };
+                    // FIX: Detect supported MIME type for Mobile (iOS/Android) compatibility
+                    let options = undefined;
+                    if (MediaRecorder.isTypeSupported('audio/mp4')) {
+                        options = { mimeType: 'audio/mp4' };
+                    } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+                        options = { mimeType: 'audio/webm' };
+                    }
+
+                    const newRecorder = new MediaRecorder(stream, options);
+                    const chunks = [];
+                    newRecorder.ondataavailable = (e) => {
+                        if (e.data.size > 0) chunks.push(e.data);
+                    };
+
+                    newRecorder.onstop = () => {
+                        // CRITICAL: Use the recorder's actual mimeType
+                        const type = newRecorder.mimeType || 'audio/webm';
+                        setRecordedBlob(new Blob(chunks, { type }));
+                    };
+                    
+                    newRecorder.start();
+                    setRecorder(newRecorder);
+                    setIsRecording(true);
+                } catch (e) { 
+                    console.error(e);
+                    alert("Could not access microphone. Please check permissions.");
+                }
+            };
 
         const stopRecording = () => {
             if (recorder) {
@@ -1867,7 +1920,9 @@ const shareCollection = async (emailToInvite) => {
                                                                     )}
                                                                     {recordedBlob && !isRecording && (
                                                                         <>
-                                                                            <button onClick={() => { const url = URL.createObjectURL(recordedBlob); new Audio(url).play(); }} className="p-3 bg-white border border-gray-200 rounded-xl hover:bg-gray-100"><Play size={16} className="text-black" /></button>
+                                                                            <button onClick={() => togglePlayback(URL.createObjectURL(recordedBlob), 'unsaved_summary')} className={`p-4 border rounded-xl shadow-sm transition-colors ${playbackState.id === 'unsaved_summary' && playbackState.isPlaying ? 'bg-black text-white border-black' : 'bg-white border-gray-200 hover:bg-gray-100 text-black'}`}>
+                                                                                {playbackState.id === 'unsaved_summary' && playbackState.isPlaying ? <Pause size={20} /> : <Play size={20} />}
+                                                                            </button>
                                                                             <button onClick={saveRecording} disabled={isSavingRecord} className="px-5 py-3 bg-black text-white font-bold text-xs uppercase rounded-xl flex items-center gap-2">{isSavingRecord ? <Spinner /> : <Save size={16} />} Save</button>
                                                                         </>
                                                                     )}
@@ -1882,7 +1937,9 @@ const shareCollection = async (emailToInvite) => {
                                                                 }).map(rec => (
                                                                     <div key={rec.id} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
                                                                         <div className="flex items-center gap-3">
-                                                                            <button onClick={() => { new Audio(rec.file_url).play(); }} className="p-2 bg-gray-50 rounded-lg hover:bg-gray-100"><Play size={12} className="text-black" /></button>
+                                                                            <button onClick={() => togglePlayback(rec.file_url, rec.id)} className={`p-2 rounded-lg transition-all ${playbackState.id === rec.id && playbackState.isPlaying ? 'bg-black text-white' : 'bg-gray-50 hover:bg-gray-100 text-black'}`}>
+                                                                                {playbackState.id === rec.id && playbackState.isPlaying ? <Pause size={12} /> : <Play size={12} />}
+                                                                            </button>
                                                                             <div className="flex flex-col">
                                                                                 <span className="text-[10px] font-bold text-gray-800 truncate max-w-[150px]">Recording</span>
                                                                                 <span className="text-[9px] text-gray-400">{new Date(rec.created_at).toLocaleTimeString()}</span>
@@ -2039,7 +2096,9 @@ const shareCollection = async (emailToInvite) => {
                                                                             
                                                                             {recordedBlob && !isRecording && (
                                                                                 <>
-                                                                                    <button onClick={() => { const url = URL.createObjectURL(recordedBlob); new Audio(url).play(); }} className="p-4 bg-white border border-gray-200 rounded-xl hover:bg-gray-100 shadow-sm transition-colors"><Play size={20} className="text-black" /></button>
+                                                                                    <button onClick={() => togglePlayback(URL.createObjectURL(recordedBlob), 'unsaved_shadow')} className={`p-3 border rounded-xl transition-all ${playbackState.id === 'unsaved_shadow' && playbackState.isPlaying ? 'bg-black text-white border-black' : 'bg-white border-gray-200 hover:bg-gray-100 text-black'}`}>
+                                                                                        {playbackState.id === 'unsaved_shadow' && playbackState.isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                                                                                    </button>
                                                                                     <button onClick={saveSummaryRecording} disabled={isSavingRecord} className="px-6 py-4 bg-black text-white font-bold text-sm uppercase rounded-xl flex items-center gap-2 shadow-lg hover:bg-gray-800 transition-all">
                                                                                         {isSavingRecord ? <Spinner /> : <Save size={18} />} Save
                                                                                     </button>
@@ -2055,7 +2114,9 @@ const shareCollection = async (emailToInvite) => {
                                                                             {recordingsList.filter(r => r.title.startsWith(`Summary - ${source.title}`)).map(rec => (
                                                                                 <div key={rec.id} className="flex items-center justify-between p-4 bg-white border border-gray-100 rounded-xl shadow-sm hover:border-gray-300 transition-all">
                                                                                     <div className="flex items-center gap-3">
-                                                                                        <button onClick={() => { new Audio(rec.file_url).play(); }} className="p-2 bg-black text-white rounded-lg hover:bg-gray-800"><Play size={12} /></button>
+                                                                                        <button onClick={() => togglePlayback(rec.file_url, rec.id)} className={`p-2 rounded-lg transition-all ${playbackState.id === rec.id && playbackState.isPlaying ? 'bg-red-500 text-white' : 'bg-black text-white hover:bg-gray-800'}`}>
+                                                                                            {playbackState.id === rec.id && playbackState.isPlaying ? <Pause size={12} /> : <Play size={12} />}
+                                                                                        </button>
                                                                                         <div className="flex flex-col">
                                                                                             <span className="text-xs font-bold text-gray-800">Summary</span>
                                                                                             <span className="text-[10px] text-gray-400">{new Date(rec.created_at).toLocaleString()}</span>
