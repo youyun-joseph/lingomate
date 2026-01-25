@@ -453,7 +453,105 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
             );
         };
 
-        
+        // --- NEW: Word Analysis Helper ---
+        const fetchWordDetails = async (apiKey, word, contextSentence) => {
+            const effectiveKey = apiKey || DEFAULT_API_KEY;
+            const body = {
+                contents: [{ parts: [{ text: `
+                    Analyze the English word "${word}" in the context of this sentence: "${contextSentence}".
+                    Provide:
+                    1. IPA Phonetic Transcription (ipa)
+                    2. A concise definition in English (definition)
+                    3. A generic example sentence using this word (example)
+                    
+                    Output strictly JSON: { "ipa": "/.../", "definition": "...", "example": "..." }
+                ` }] }],
+                generationConfig: { responseMimeType: "application/json" }
+            };
+            try {
+                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+                return JSON.parse(data.candidates[0].content.parts[0].text);
+            } catch (e) {
+                console.error("Word analysis failed", e);
+                return { ipa: "", definition: "Could not fetch definition.", example: "" };
+            }
+        };
+
+        // --- NEW: Interactive Text Component ---
+        // Splits text into words and punctuation, making words clickable
+        const InteractiveText = ({ text, onWordClick, className = "" }) => {
+            if (!text) return null;
+            // Split by words (alphanumeric + apostrophes/dashes) while keeping delimiters
+            const parts = text.split(/([a-zA-Z0-9']+(?:-[a-zA-Z0-9']+)*)/);
+            
+            return (
+                <div className={`inline-block leading-relaxed ${className}`}>
+                    {parts.map((part, i) => {
+                        // Check if part is a word (starts with letter/number)
+                        const isWord = /^[a-zA-Z0-9]/.test(part);
+                        if (isWord) {
+                            return (
+                                <span 
+                                    key={i} 
+                                    onClick={(e) => { e.stopPropagation(); onWordClick(part); }}
+                                    className="cursor-pointer hover:bg-yellow-200 hover:text-black rounded px-0.5 transition-colors border-b border-transparent hover:border-black/20"
+                                >
+                                    {part}
+                                </span>
+                            );
+                        }
+                        return <span key={i}>{part}</span>;
+                    })}
+                </div>
+            );
+        };
+
+        // --- NEW: Word Detail Popup ---
+        const WordDetailModal = ({ isOpen, onClose, data, word, isLoading, onPlay, onAddVocab }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/20 backdrop-blur-[2px] fade-in" onClick={onClose}>
+                    <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden border border-gray-100" onClick={e => e.stopPropagation()}>
+                        <div className="p-5 relative">
+                            <button onClick={onClose} className="absolute top-3 right-3 p-1 text-gray-400 hover:bg-gray-100 rounded-full"><X size={16} /></button>
+                            
+                            <div className="flex items-baseline gap-3 mb-1">
+                                <h3 className="text-2xl font-bold text-gray-900">{word}</h3>
+                                {!isLoading && data?.ipa && <span className="text-sm font-mono text-gray-500">{data.ipa}</span>}
+                            </div>
+
+                            {/* Actions Row */}
+                            <div className="flex gap-2 mb-4">
+                                <button onClick={() => onPlay(word)} className="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors flex items-center gap-2 text-xs font-bold">
+                                    <Volume2 size={14} /> Listen
+                                </button>
+                                <button onClick={() => { onAddVocab(); onClose(); }} className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors flex items-center gap-2 text-xs font-bold">
+                                    <Plus size={14} /> Add to Vocab
+                                </button>
+                            </div>
+
+                            {isLoading ? (
+                                <div className="py-8 flex flex-col items-center justify-center text-gray-400 gap-2">
+                                    <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+                                    <span className="text-xs">Analyzing context...</span>
+                                </div>
+                            ) : (
+                                <div className="space-y-3 animate-in fade-in">
+                                    <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                        <p className="text-sm text-gray-700 leading-relaxed font-medium">{data.definition}</p>
+                                    </div>
+                                    {data.example && (
+                                        <div className="pl-2 border-l-2 border-indigo-200">
+                                            <p className="text-xs text-gray-500 italic">"{data.example}"</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
 
         const formatTime = (s) => {
             if (s === undefined || s === null) return "0:00.000";
@@ -511,6 +609,46 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
                 setPlaybackState({ id, isPlaying: true });
             };
             
+            // --- NEW: Word Lookup State ---
+            const [wordPopup, setWordPopup] = useState({ open: false, word: '', data: null, loading: false });
+
+            const handleWordClick = async (clickedWord) => {
+                // 1. Clean the word (remove punctuation if any leaked through, though regex mostly handles it)
+                const cleanWord = clickedWord.trim();
+                if (!cleanWord) return;
+
+                // 2. Play Audio Immediately
+                const u = new SpeechSynthesisUtterance(cleanWord);
+                u.lang = 'en-US';
+                window.speechSynthesis.speak(u);
+
+                // 3. Open Modal with Loading State
+                setWordPopup({ open: true, word: cleanWord, data: null, loading: true });
+
+                // 4. Fetch AI Definition in Context
+                const contextSentence = transcript[activeIndex]?.text || "";
+                const details = await fetchWordDetails(geminiKey, cleanWord, contextSentence);
+                
+                // 5. Update Modal
+                setWordPopup(prev => ({ ...prev, loading: false, data: details }));
+            };
+
+            const handleAddWordToVocab = async () => {
+                if (!user || !wordPopup.data) return;
+                const { error } = await supabase.from('user_vocabulary').insert([{ 
+                    user_id: user.id, 
+                    word: wordPopup.word, 
+                    definition: wordPopup.data.definition, 
+                    example: wordPopup.data.example 
+                }]);
+                if (!error) {
+                    fetchVocabulary(user.id); 
+                    alert("Saved to vocabulary!");
+                } else {
+                    alert("Error saving word");
+                }
+            };
+
             // --- NEW: Collapsible Sidebar State ---
             const [collapsedLevels, setCollapsedLevels] = useState({}); // Empty = All Expanded by default
 
@@ -1871,24 +2009,29 @@ const shareCollection = async (emailToInvite) => {
                                                             </div>
 
                                                             {/* 2. NEW: TRANSCRIPT DISPLAY & TOGGLE */}
+                                                            {/* 2. NEW: TRANSCRIPT DISPLAY & TOGGLE */}
                                                             <div className="space-y-4">
                                                                 {showShadowingContent && (
                                                                     <div className="p-8 bg-gray-50 rounded-[2.5rem] border border-gray-100 min-h-[150px] flex flex-col items-center justify-center text-center transition-all animate-in fade-in slide-in-from-top-2">
                                                                         {chunkSize === 'single' ? (
-                                                                            // MODE A: Single Sentence (Big Text)
-                                                                            <p className="text-xl font-semibold text-gray-900 leading-relaxed">
-                                                                                {transcript[activeIndex]?.text || <span className="text-gray-400 italic font-normal">Play audio to see text...</span>}
-                                                                            </p>
+                                                                            // MODE A: Single Sentence -> Interactive
+                                                                            <div className="text-xl font-semibold text-gray-900 leading-relaxed">
+                                                                                {transcript[activeIndex] ? (
+                                                                                    <InteractiveText text={transcript[activeIndex].text} onWordClick={handleWordClick} />
+                                                                                ) : (
+                                                                                    <span className="text-gray-400 italic font-normal">Play audio to see text...</span>
+                                                                                )}
+                                                                            </div>
                                                                         ) : (
-                                                                            // MODE B: Chunk/History Mode (List of all played sentences)
+                                                                            // MODE B: Chunk Mode -> Interactive List
                                                                             <div className="w-full space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar px-2">
                                                                                 {visitedIndices.size === 0 ? (
                                                                                     <span className="text-gray-400 italic">Play audio to see transcript history...</span>
                                                                                 ) : (
                                                                                     Array.from(visitedIndices).sort((a,b) => a-b).map(idx => (
-                                                                                        <p key={idx} className={`text-lg leading-relaxed transition-colors ${idx === activeIndex ? 'font-bold text-gray-900' : 'text-gray-400'}`}>
-                                                                                            {transcript[idx]?.text}
-                                                                                        </p>
+                                                                                        <div key={idx} className={`text-lg leading-relaxed transition-colors ${idx === activeIndex ? 'font-bold text-gray-900' : 'text-gray-400'}`}>
+                                                                                            <InteractiveText text={transcript[idx]?.text} onWordClick={handleWordClick} />
+                                                                                        </div>
                                                                                     ))
                                                                                 )}
                                                                             </div>
@@ -1966,10 +2109,12 @@ const shareCollection = async (emailToInvite) => {
                                                                     // MODE A: Single Sentence (Original behavior)
                                                                     <div className="w-full">
                                                                         {showDictationContent && (
-                                                                            <div className="w-full text-center px-6 py-4 mb-8 bg-white/50 rounded-2xl border border-gray-200 fade-in">
-                                                                                <p className="text-lg font-semibold text-gray-900 leading-relaxed">{transcript[activeIndex]?.text}</p>
+                                                                        <div className="w-full text-center px-6 py-4 mb-8 bg-white/50 rounded-2xl border border-gray-200 fade-in">
+                                                                            <div className="text-lg font-semibold text-gray-900 leading-relaxed">
+                                                                                <InteractiveText text={transcript[activeIndex]?.text} onWordClick={handleWordClick} />
                                                                             </div>
-                                                                        )}
+                                                                        </div>
+                                                                    )}
                                                                         {renderDictationSlots(activeIndex)}
                                                                     </div>
                                                                 ) : (
@@ -1983,10 +2128,12 @@ const shareCollection = async (emailToInvite) => {
                                                                             {Array.from(visitedIndices).sort((a,b) => a - b).map(idx => (
                                                                                 <div key={idx} className="w-full pb-8 border-b border-gray-200 last:border-0 fade-in">
                                                                                     {showDictationContent && (
-                                                                                        <div className="w-full text-center px-6 py-4 mb-6 bg-white/50 rounded-2xl border border-gray-200">
-                                                                                            <p className="text-lg font-semibold text-gray-900 leading-relaxed">{transcript[idx]?.text}</p>
-                                                                                        </div>
-                                                                                    )}
+                                                                        <div className="w-full text-center px-6 py-4 mb-8 bg-white/50 rounded-2xl border border-gray-200 fade-in">
+                                                                            <div className="text-lg font-semibold text-gray-900 leading-relaxed">
+                                                                                <InteractiveText text={transcript[activeIndex]?.text} onWordClick={handleWordClick} />
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
                                                                                     {renderDictationSlots(idx)}
                                                                                 </div>
                                                                             ))}
@@ -2002,7 +2149,11 @@ const shareCollection = async (emailToInvite) => {
                                                             <div className="grid grid-cols-3 gap-3"><button onClick={() => handleTranscriptSeek(activeIndex - 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><SkipBack size={14} /> Previous</button><button onClick={() => handleTranscriptSeek(activeIndex)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider"><RefreshCw size={14} /> Current</button><button onClick={() => handleTranscriptSeek(activeIndex + 1)} className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors border border-gray-100 text-[10px] font-bold uppercase tracking-wider">Next <SkipForward size={14} /></button></div>
                                                             <div className="flex-1 flex flex-col gap-4">
                                                                 <label className="text-xs font-bold text-gray-400 uppercase px-1 tracking-widest">Source sentence</label>
-                                                                <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100"><p className="text-lg font-semibold text-gray-900 leading-relaxed italic">{transcript[activeIndex]?.text || "Select a segment to practice"}</p></div>
+                                                                <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100 text-lg font-semibold text-gray-900 leading-relaxed italic">
+                                                                    {transcript[activeIndex] ? (
+                                                                        <InteractiveText text={transcript[activeIndex].text} onWordClick={handleWordClick} />
+                                                                    ) : "Select a segment to practice"}
+                                                                </div>                                                                
                                                                 <label className="text-xs font-bold text-gray-400 uppercase px-1 tracking-widest">Your translation</label>
                                                                 <textarea className="w-full p-6 bg-white border border-gray-200 rounded-3xl text-lg outline-none focus:ring-2 focus:ring-indigo-500 min-h-[120px] transition-all" placeholder="Type your translation here..." value={translationAttempt} onChange={(e) => setTranslationAttempt(e.target.value)} />
                                                                 
