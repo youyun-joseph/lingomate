@@ -438,6 +438,9 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
                             ref={mediaRef} 
                             src={source.url} 
                             className="w-full h-full object-contain"
+                            playsInline // <--- THIS IS THE KEY FIX
+                            webkit-playsinline="true" // Extra compatibility for older iOS
+                            controls // Optional: You might want native controls on mobile
                             onTimeUpdate={(e) => onTimeUpdate(e.target.currentTime)}
                         />
                     </div>
