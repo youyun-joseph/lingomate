@@ -1363,6 +1363,50 @@ const shareCollection = async (emailToInvite) => {
                 }
             };
 
+            // --- NEW: Delete Segment with Ripple Logic ---
+            const handleDeleteSegment = async (e, index) => {
+                e.stopPropagation();
+                if (!confirm("Are you sure you want to delete this segment? All following timestamps will be shifted back.")) return;
+
+                // 1. Create a deep copy
+                const newTranscript = JSON.parse(JSON.stringify(transcript));
+                
+                // 2. Remove the item at the specific index
+                newTranscript.splice(index, 1);
+
+                // 3. Ripple Shift: Adjust all subsequent segments to close the gap
+                // We maintain the original DURATION of each segment, but shift start/end.
+                let currentStart = index === 0 ? 0 : newTranscript[index - 1].end;
+
+                for (let i = index; i < newTranscript.length; i++) {
+                    const segment = newTranscript[i];
+                    const duration = segment.end - segment.start;
+                    
+                    segment.start = currentStart;
+                    // Ensure minimum duration of 0.1s to prevent errors
+                    segment.end = currentStart + Math.max(0.1, duration);
+                    
+                    currentStart = segment.end;
+                }
+
+                // 4. Update UI
+                setTranscript(newTranscript);
+
+                // 5. Update Database (if saved)
+                if (user && source.id) {
+                    const { error } = await supabase
+                        .from('transcripts')
+                        .update({ content: newTranscript })
+                        .eq('id', source.id);
+                    
+                    if (error) {
+                        alert("Failed to save changes to cloud: " + error.message);
+                    } else {
+                        fetchHistory(); // Refresh list
+                    }
+                }
+            };
+
             const playManualRange = () => {
                 if (editingIndex === null) return;
                 const start = transcript[editingIndex].start;
@@ -2340,8 +2384,13 @@ const shareCollection = async (emailToInvite) => {
                                                 <div className="flex justify-between items-center mb-1 text-[9px] font-bold uppercase tracking-wider opacity-60"><span>{s.speaker || 'Speaker'}</span><span>{formatTime(s.start)} - {formatTime(s.end)}</span></div>
                                                 <p className="text-sm font-medium leading-relaxed pr-8">{s.text}</p>
                                                 
-                                                {/* Action Buttons */}
+                                               {/* Action Buttons */}
                                                 <div className={`absolute right-3 bottom-3 flex gap-1 ${isSelected || isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+                                                    {/* NEW: Delete Button */}
+                                                    <button title="Delete Segment" onClick={(e) => handleDeleteSegment(e, idx)} className={`p-1.5 rounded-lg transition-all ${isSelected ? 'bg-white/20 text-white hover:bg-red-500' : isActive ? 'bg-white/20 text-white hover:bg-red-500' : 'bg-gray-100 text-gray-600 hover:bg-red-100 hover:text-red-600'}`}>
+                                                        <Trash2 size={14} />
+                                                    </button>
+
                                                     <button title="Edit Timestamp" onClick={(e) => handleManualEditOpen(e, idx)} className={`p-1.5 rounded-lg transition-all ${isSelected ? 'bg-white/20 text-white hover:bg-white/30' : isActive ? 'bg-white/20 text-white hover:bg-white/30' : 'bg-gray-100 text-gray-600 hover:bg-indigo-100 hover:text-indigo-600'}`}>
                                                         <Pencil size={14} />
                                                     </button>
