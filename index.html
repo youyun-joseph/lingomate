@@ -817,6 +817,20 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
                 return currentTime >= s.start && currentTime < nextStart;
             });
 
+            // --- NEW: Auto-Scroll Sidebar to Active Sentence ---
+            useEffect(() => {
+                // 1. Check if there is a valid active sentence
+                if (activeIndex !== -1) {
+                    // 2. Find the HTML element with the specific ID (we will add IDs in Step 2)
+                    const el = document.getElementById(`transcript-item-${activeIndex}`);
+                    
+                    // 3. If the element exists, scroll it smoothly to the center of the view
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                }
+            }, [activeIndex]); // <--- This dependency array ensures it runs every time activeIndex updates
+
             const autoCollapseTranscript = () => { if (transcriptOpen) setTranscriptOpen(false); };
 
             // OPTIMIZED: Intelligent Panel Management for Mobile
@@ -2320,7 +2334,7 @@ const shareCollection = async (emailToInvite) => {
                                     const isSelected = selectedIndices.includes(idx);
                                     const isActive = activeIndex === idx;
                                     return (
-                                        <div key={idx} onClick={(e) => handleSidebarClick(e, idx)} className={`group p-4 rounded-xl cursor-pointer transition-all border-2 flex gap-3 relative ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg z-10' : isActive ? 'bg-black border-black text-white shadow-md' : 'bg-white border-transparent hover:border-gray-100 text-gray-500 shadow-sm'}`}>
+                                        <div key={idx} id={`transcript-item-${idx}`} /* <--- ADD THIS ID */ onClick={(e) => handleSidebarClick(e, idx)} className={`group p-4 rounded-xl cursor-pointer transition-all border-2 flex gap-3 relative ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg z-10' : isActive ? 'bg-black border-black text-white shadow-md' : 'bg-white border-transparent hover:border-gray-100 text-gray-500 shadow-sm'}`}>
                                             <div className="pt-0.5 shrink-0"><div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${isSelected ? 'bg-white border-white text-indigo-600' : isActive ? 'bg-white/20 border-white/40 text-transparent' : 'bg-gray-50 border-gray-200 text-transparent group-hover:border-gray-300'}`}>{isSelected && <Check size={14} strokeWidth={4} className="fade-in" />}</div></div>
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex justify-between items-center mb-1 text-[9px] font-bold uppercase tracking-wider opacity-60"><span>{s.speaker || 'Speaker'}</span><span>{formatTime(s.start)} - {formatTime(s.end)}</span></div>
