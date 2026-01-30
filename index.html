@@ -355,7 +355,7 @@ Output JSON:` }];
                 rawText = data.candidates[0].content.parts[0].text;
             } catch (err) {
                 console.warn("Gemini 2.5 failed, attempting fallback to 2.0", err);
-                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", { 
+                const data = await callGemini(effectiveKey, "gemini-2.5-flash-preview-09-2025", { 
                     contents: [{ parts: parts }], 
                     generationConfig: { temperature: 0.0, responseMimeType: "application/json" } 
                 });
@@ -394,7 +394,7 @@ ALL EXPLANATIONS MUST BE IN CHINESE SIMPLIFIED (简体中文).
 Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "..." }.` }] }],
                 generationConfig: { responseMimeType: "application/json" }
             };
-            const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+            const data = await callGemini(effectiveKey, "gemini-2.5-flash-preview-09-2025", body);
             return JSON.parse(data.candidates[0].content.parts[0].text);
         };
 
@@ -411,7 +411,7 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
                 generationConfig: { responseMimeType: "application/json" }
             };
 
-            const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+            const data = await callGemini(effectiveKey, "gemini-2.5-flash-preview-09-2025", body);
             return JSON.parse(data.candidates[0].content.parts[0].text);
         };
 
@@ -472,7 +472,7 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
                 generationConfig: { responseMimeType: "application/json" }
             };
             try {
-                const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+                const data = await callGemini(effectiveKey, "gemini-2.5-flash-preview-09-2025", body);
                 return JSON.parse(data.candidates[0].content.parts[0].text);
             } catch (e) {
                 console.error("Word analysis failed", e);
