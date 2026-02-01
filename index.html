@@ -606,6 +606,8 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
                 
                 audio.play().catch(e => {
                     console.error("Playback failed:", e);
+                    // Reset state so the UI doesn't show 'Pause' button
+                    setPlaybackState({ id: null, isPlaying: false });
                     alert("Unable to play audio. Format might not be supported on this device.");
                 });
                 
@@ -1566,13 +1568,16 @@ const shareCollection = async (emailToInvite) => {
                         streamRef.current = stream;
                     }
 
-                    // FIX: Detect supported MIME type for Mobile (iOS/Android) compatibility
+                    // FIX: Reordered Priorities to fix playback error
+                    // 1. WebM -> Preferred for PC (Chrome/Edge), Android
+                    // 2. MP4 -> Required for iOS (iPhone/iPad), Safari
                     let options = undefined;
-                    if (MediaRecorder.isTypeSupported('audio/mp4')) {
-                        options = { mimeType: 'audio/mp4' };
-                    } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+                    if (MediaRecorder.isTypeSupported('audio/webm')) {
                         options = { mimeType: 'audio/webm' };
+                    } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+                        options = { mimeType: 'audio/mp4' };
                     }
+                    // If neither matches (rare), we pass undefined and let browser choose default.
 
                     const newRecorder = new MediaRecorder(stream, options);
                     const chunks = [];
@@ -1581,9 +1586,13 @@ const shareCollection = async (emailToInvite) => {
                     };
 
                     newRecorder.onstop = () => {
-                        // CRITICAL: Use the recorder's actual mimeType
-                        const type = newRecorder.mimeType || 'audio/webm';
-                        setRecordedBlob(new Blob(chunks, { type }));
+                        // CRITICAL: Ensure the Blob gets the correct MIME type
+                        const type = newRecorder.mimeType || (options ? options.mimeType : 'audio/webm');
+                        const blob = new Blob(chunks, { type });
+                        setRecordedBlob(blob); // Optional: Updates UI briefly
+                        
+                        // --- NEW: AUTO SAVE ---
+                        saveRecording(blob); 
                     };
                     
                     newRecorder.start();
@@ -1604,14 +1613,16 @@ const shareCollection = async (emailToInvite) => {
             }
         };
 
-            const saveRecording = async () => {
-                if (!recordedBlob) return;
+            const saveRecording = async (blobInput) => {
+                // 1. Accept blob directly (from Auto-Save) or fall back to state
+                const blobToUse = blobInput instanceof Blob ? blobInput : recordedBlob;
+                if (!blobToUse) return;
                 
-                // 1. INSTANT LOCK: Prevent double-clicks immediately
+                // 2. Lock to prevent duplicates
                 if (saveLockRef.current) return; 
                 saveLockRef.current = true;
                 
-                // 2. Check Login
+                // 3. Auth Check
                 if (!user) {
                     alert("Please sign in to save your recordings.");
                     saveLockRef.current = false; 
@@ -1622,27 +1633,26 @@ const shareCollection = async (emailToInvite) => {
 
                 try {
                     const isShadowing = activeTab === 'Shadowing' && source;
-                    // Create a "Base Name" that identifies this sentence
-                    // We will search for anything starting with this string later
-                    const shadowingBaseName = isShadowing 
-                        ? `Shadowing - ${source.title} - S${activeIndex} -` 
-                        : null;
+                    const isSummary = activeTab === 'Summary' && source;
 
+                    // 4. Determine Title based on Active Tab
                     let title = `Recording ${new Date().toLocaleString()}`;
+                    const shadowingBaseName = `Shadowing - ${source?.title} - S${activeIndex} -`;
+                    const summaryBaseName = `Summary - ${source?.title}`;
+
                     if (isShadowing) {
-                        // We append the timestamp here, making the full title unique
                         title = `${shadowingBaseName}${Date.now()}`;
+                    } else if (isSummary) {
+                        title = `${summaryBaseName} - ${Date.now()}`;
                     }
 
-                    // 3. Upload New File to Storage (This creates a new unique file)
+                    // 5. Upload File
                     const path = `${user.id}/recordings/${Date.now()}.webm`;
-                    const { error: uploadError } = await supabase.storage.from('media').upload(path, recordedBlob);
+                    const { error: uploadError } = await supabase.storage.from('media').upload(path, blobToUse);
                     if (uploadError) throw new Error("Upload failed: " + uploadError.message);
                     
-                    // 4. Insert New Record into Database
+                    // 6. Save to Database
                     const { data: urlData } = supabase.storage.from('media').getPublicUrl(path);
-                    
-                    // NOTE: We select().single() to get back the ID of the record we just created
                     const { data: newRecord, error: dbError } = await supabase.from('user_recordings').insert([{ 
                         user_id: user.id, 
                         title: title, 
@@ -1651,53 +1661,41 @@ const shareCollection = async (emailToInvite) => {
                     
                     if (dbError) throw new Error("Database save failed: " + dbError.message);
 
-                    // 5. CLEANUP: Find and Delete OLD records for this sentence
+                    // 7. CLEANUP: Enforce Limits
+                    // A. Shadowing Limit: 1 per sentence
                     if (isShadowing && newRecord) {
-                        // Find ALL records that start with "Shadowing - Title - S[x] -"
-                        const { data: duplicates } = await supabase
-                            .from('user_recordings')
-                            .select('id, file_url')
-                            .eq('user_id', user.id)
-                            .ilike('title', `${shadowingBaseName}%`); // Search by Prefix
-
+                        const { data: duplicates } = await supabase.from('user_recordings').select('id, file_url').eq('user_id', user.id).ilike('title', `${shadowingBaseName}%`);
                         if (duplicates && duplicates.length > 0) {
-                            // Filter list: Keep the NEW record, delete everything else
-                            const idsToDelete = duplicates
-                                .filter(r => r.id !== newRecord.id) // Exclude the one we just made
-                                .map(r => r.id);
-
+                            const idsToDelete = duplicates.filter(r => r.id !== newRecord.id).map(r => r.id);
                             if (idsToDelete.length > 0) {
-                                // A. Delete from Database
                                 await supabase.from('user_recordings').delete().in('id', idsToDelete);
-                                console.log("Cleaned up old versions:", idsToDelete);
-
-                                // B. (Optional) Delete from Storage to save space
-                                // We extract the path from the public URL to delete the actual file
-                                const pathsToDelete = duplicates
-                                    .filter(r => r.id !== newRecord.id)
-                                    .map(r => {
-                                        const urlParts = r.file_url.split('/media/');
-                                        return urlParts.length > 1 ? urlParts[1] : null;
-                                    })
-                                    .filter(p => p !== null);
-                                
-                                if (pathsToDelete.length > 0) {
-                                    await supabase.storage.from('media').remove(pathsToDelete);
-                                }
+                                // Optional: Delete old files from storage here to save space
                             }
                         }
                     }
 
-                    // 6. Refresh List
+                    // B. Summary Limit: 2 per audio
+                    if (isSummary && newRecord) {
+                         const { data: summaries } = await supabase.from('user_recordings').select('id').eq('user_id', user.id).ilike('title', `${summaryBaseName}%`).order('created_at', { ascending: false });
+                         if (summaries && summaries.length > 2) {
+                             // Keep the top 2 (newest), delete the rest
+                             const idsToDelete = summaries.slice(2).map(r => r.id);
+                             if (idsToDelete.length > 0) {
+                                 await supabase.from('user_recordings').delete().in('id', idsToDelete);
+                             }
+                         }
+                    }
+
+                    // 8. Refresh & Reset
                     await fetchRecordings(user.id);
-                    setRecordedBlob(null);
+                    setRecordedBlob(null); // Clear "unsaved" state
 
                 } catch (err) {
                     console.error(err);
                     alert("Error saving recording: " + err.message);
                 } finally {
                     setIsSavingRecord(false);
-                    saveLockRef.current = false; // Release lock
+                    saveLockRef.current = false;
                 }
             };
 
@@ -2124,13 +2122,11 @@ const shareCollection = async (emailToInvite) => {
                                                                     ) : (
                                                                         <button onClick={stopRecording} className="flex-1 flex items-center justify-center gap-2 py-3 bg-red-500 text-white font-bold text-xs uppercase rounded-xl hover:bg-red-600 transition-all animate-pulse"><Square size={12} className="fill-current" /> Stop recording</button>
                                                                     )}
-                                                                    {recordedBlob && !isRecording && (
-                                                                        <>
-                                                                            <button onClick={() => togglePlayback(URL.createObjectURL(recordedBlob), 'unsaved_summary')} className={`p-4 border rounded-xl shadow-sm transition-colors ${playbackState.id === 'unsaved_summary' && playbackState.isPlaying ? 'bg-black text-white border-black' : 'bg-white border-gray-200 hover:bg-gray-100 text-black'}`}>
-                                                                                {playbackState.id === 'unsaved_summary' && playbackState.isPlaying ? <Pause size={20} /> : <Play size={20} />}
-                                                                            </button>
-                                                                            <button onClick={saveRecording} disabled={isSavingRecord} className="px-5 py-3 bg-black text-white font-bold text-xs uppercase rounded-xl flex items-center gap-2">{isSavingRecord ? <Spinner /> : <Save size={16} />} Save</button>
-                                                                        </>
+                                                                    {/* Auto-save indicator */}
+                                                                    {isSavingRecord && (
+                                                                         <div className="flex items-center gap-2 px-4 py-3 bg-gray-50 rounded-xl border border-gray-100">
+                                                                             <Spinner /> <span className="text-xs font-bold text-gray-500">Saving...</span>
+                                                                         </div>
                                                                     )}
                                                                 </div>
                                                                 
