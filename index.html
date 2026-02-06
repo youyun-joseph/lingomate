@@ -2007,7 +2007,8 @@ const shareCollection = async (emailToInvite) => {
                             )}
 
                             <div className="flex-1 flex flex-col overflow-y-auto relative custom-scrollbar">
-                                <div className={`px-4 md:px-8 pb-24 pt-20 mx-auto w-full transition-all duration-300 ${activeTab === 'Dictation' ? 'max-w-5xl' : 'max-w-3xl'}`}>
+                                {/* UPDATE 1: Conditional Padding (pt-0 on mobile video, pt-20 otherwise) */}
+                                <div className={`px-4 md:px-8 pb-24 mx-auto w-full transition-all duration-300 ${activeTab === 'Dictation' ? 'max-w-5xl' : 'max-w-3xl'} ${isMobile && source?.mediaType === 'video' ? 'pt-0' : 'pt-20'}`}>
                                     {!source ? (
                                         // LOGIC: If user is logged in AND is a student, show "Student Workspace"
                                         user && userRole === 'student' ? (
@@ -2063,7 +2064,11 @@ const shareCollection = async (emailToInvite) => {
                                         </div>
                                     ) : (
                                         <div className="space-y-4 fade-in">
-                                            <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={currentTime} onTimeUpdate={handleTimeUpdate} loopRange={loopRange} seekTrigger={seekTrigger} />
+                                            {/* UPDATE 2: Sticky Wrapper for Video on Mobile */}
+                                            {/* 'sticky top-0' pins it. '-mx-4 px-4' ensures full width. 'z-50' keeps it above text. */}
+                                            <div className={`transition-all ${isMobile && source?.mediaType === 'video' ? 'sticky top-0 z-50 bg-gray-50 -mx-4 px-4 shadow-sm pb-2 pt-2' : ''}`}>
+                                                <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={currentTime} onTimeUpdate={handleTimeUpdate} loopRange={loopRange} seekTrigger={seekTrigger} />
+                                            </div>
                                             
                                             <div className="bg-white border border-gray-100 p-4 rounded-2xl shadow-sm flex items-center justify-between px-6 transition-all">
                                                 <div className="flex items-center gap-4">
