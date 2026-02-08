@@ -920,9 +920,8 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
             useEffect(() => {
                 if (!source) { 
                     // 1. App Entry / No File Loaded
-                    // Mobile: Keep Library CLOSED so user sees the "Upload/Welcome" screen immediately.
-                    // Desktop: Open Library by default.
-                    setSidebarOpen(!isMobile); 
+                    // UPDATE: Only open Library if not mobile AND user is signed in
+                    setSidebarOpen(!isMobile && !!user); 
                     setTranscriptOpen(false);
                 } else { 
                     // 2. File Loaded (Entering Audio)
@@ -933,7 +932,7 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
                     // Desktop: Auto-open Transcript only on large screens (XL).
                     setTranscriptOpen(!isMobile && window.innerWidth >= 1280);
                 }
-            }, [source, isMobile]);
+            }, [source, isMobile, user]); // <--- Added 'user' to dependencies
 
             useEffect(() => {
                 setDictationValues({}); setDictationChecked(false); setShowDictationContent(false); setAnalysis(null);
@@ -2081,7 +2080,9 @@ const shareCollection = async (emailToInvite) => {
                                         onChange={(e) => setActiveCollectionId(e.target.value)} 
                                         className="flex-1 bg-white border border-gray-200 text-xs font-bold rounded-xl px-3 py-2 outline-none focus:border-black cursor-pointer"
                                     >
-                                        <option value="default">My Collection (Default)</option>
+                                        {/* UPDATE: Hide Default Collection if user is a Student */}
+                                        {userRole !== 'student' && <option value="default">My Collection (Default)</option>}
+                                        
                                         {collections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                     </select>
                                     <button onClick={() => setIsCollectionModalOpen(true)} className="p-2 bg-black text-white rounded-xl hover:bg-gray-800 transition-colors" title="New Collection">
@@ -2169,8 +2170,20 @@ const shareCollection = async (emailToInvite) => {
                                 {/* UPDATE 1: Conditional Padding (pt-0 on mobile video, pt-20 otherwise) */}
                                 <div className={`px-4 md:px-8 pb-24 mx-auto w-full transition-all duration-300 ${activeTab === 'Dictation' ? 'max-w-5xl' : 'max-w-3xl'} ${isMobile && source?.mediaType === 'video' ? 'pt-0' : 'pt-20'}`}>
                                     {!source ? (
-                                        // LOGIC: If user is logged in AND is a student, show "Student Workspace"
-                                        user && userRole === 'student' ? (
+                                        !user ? (
+                                            // 1. NOT LOGGED IN: Show Welcome Screen
+                                            <div className="mt-20 flex flex-col items-center text-center space-y-6 animate-in fade-in zoom-in duration-500">
+                                                <div className="w-24 h-24 bg-black rounded-3xl flex items-center justify-center shadow-xl mb-4 rotate-3 hover:rotate-6 transition-transform">
+                                                    <span className="text-4xl">👋</span>
+                                                </div>
+                                                <h1 className="text-4xl md:text-5xl font-extrabold text-gray-900 tracking-tight">Welcome to LingoMate</h1>
+                                                <p className="text-lg text-gray-500 max-w-md leading-relaxed">Sign in to start practicing listening, shadowing, and vocabulary.</p>
+                                                <button onClick={() => setIsLoginOpen(true)} className="px-10 py-4 bg-black text-white font-bold text-lg rounded-full hover:bg-gray-800 transition-all shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 flex items-center gap-2">
+                                                    <User size={20} /> Sign In to Get Started
+                                                </button>
+                                            </div>
+                                        ) : userRole === 'student' ? (
+                                            // 2. LOGGED IN (Student): Show Student Workspace
                                             <div className="mt-16 bg-white p-12 border border-gray-100 shadow-sm rounded-3xl text-center">
                                                 <div className="w-16 h-16 bg-gray-50 mx-auto mb-6 flex items-center justify-center rounded-2xl text-gray-400">
                                                     <BookOpen className="w-8 h-8" />
@@ -2181,7 +2194,7 @@ const shareCollection = async (emailToInvite) => {
                                                 </p>
                                             </div>
                                         ) : (
-                                            // LOGIC: Otherwise (Teacher or Guest), show the Upload Button
+                                            // 3. LOGGED IN (Teacher/Other): Show Upload
                                             <div className="mt-16 bg-white p-12 border border-gray-100 shadow-sm rounded-3xl text-center group">
                                                 <div className="w-16 h-16 bg-gray-50 mx-auto mb-6 flex items-center justify-center group-hover:bg-black rounded-2xl"><Upload className="w-8 h-8" /></div>
                                                 <h3 className="font-bold text-2xl mb-2 text-gray-900">Analyze media</h3>
