@@ -161,23 +161,77 @@
             );
         };
 
-        const SettingsModal = ({ isOpen, onClose, apiKey, onSave }) => {
+        const SettingsModal = ({ isOpen, onClose, apiKey, onSave, isLoggedIn, onOpenChangePassword }) => {
             const [key, setKey] = useState(apiKey || '');
             return (
                 <ModalLayout isOpen={isOpen} onClose={onClose} title="Settings" icon={Settings}>
-                    <div className="space-y-4">
-                        <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl flex gap-3">
-                            <AlertCircle className="w-5 h-5 text-blue-600 shrink-0" />
-                            <p className="text-xs text-blue-800 leading-relaxed">Enter your Gemini API key to enable transcription and grammar analysis features.</p>
+                    <div className="space-y-6">
+                        {/* API Key Section */}
+                        <div className="space-y-4">
+                            <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl flex gap-3">
+                                <AlertCircle className="w-5 h-5 text-blue-600 shrink-0" />
+                                <p className="text-xs text-blue-800 leading-relaxed">Enter your Gemini API key to enable transcription and grammar analysis features.</p>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Gemini API Key</label>
+                                <input type="password" placeholder="AIza..." className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-black transition-all" value={key} onChange={e => setKey(e.target.value)} />
+                            </div>
+                            <button onClick={() => { onSave(key); onClose(); }} className="w-full bg-black text-white py-4 font-bold rounded-xl hover:bg-gray-800 transition-all shadow-md">
+                                Save Settings
+                            </button>
                         </div>
-                        <div>
-                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Gemini API Key</label>
-                            <input type="password" placeholder="AIza..." className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-black transition-all" value={key} onChange={e => setKey(e.target.value)} />
-                        </div>
-                        <button onClick={() => { onSave(key); onClose(); }} className="w-full bg-black text-white py-4 font-bold rounded-xl hover:bg-gray-800 transition-all shadow-md">
-                            Save Settings
-                        </button>
+
+                        {/* Account Section (Only if logged in) */}
+                        {isLoggedIn && (
+                            <div className="pt-6 border-t border-gray-100 space-y-4">
+                                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Account Security</h4>
+                                <button onClick={() => { onClose(); onOpenChangePassword(); }} className="w-full py-4 bg-white border border-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-50 transition-all flex justify-center items-center gap-2">
+                                    <KeyRound size={16} /> Change Password
+                                </button>
+                            </div>
+                        )}
                     </div>
+                </ModalLayout>
+            );
+        };
+
+        const ChangePasswordModal = ({ isOpen, onClose, onChange }) => {
+            const [password, setPassword] = useState("");
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (password.length < 6) {
+                    alert("Password must be at least 6 characters.");
+                    return;
+                }
+                setLoading(true);
+                await onChange(password);
+                setLoading(false);
+                setPassword("");
+                onClose();
+            };
+
+            if (!isOpen) return null;
+            return (
+                <ModalLayout isOpen={isOpen} onClose={onClose} title="Change Password" icon={KeyRound}>
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">New Password</label>
+                            <input 
+                                type="password" 
+                                required 
+                                minLength={6}
+                                className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-black transition-all" 
+                                value={password} 
+                                onChange={e => setPassword(e.target.value)} 
+                                placeholder="Min 6 characters" 
+                            />
+                        </div>
+                        <button type="submit" disabled={loading} className="w-full bg-black text-white py-4 font-bold rounded-xl hover:bg-gray-800 transition-all shadow-md flex justify-center items-center gap-2">
+                            {loading ? <Loader2 className="animate-spin w-4 h-4" /> : "Update Password"}
+                        </button>
+                    </form>
                 </ModalLayout>
             );
         };
@@ -644,6 +698,8 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
         // --- MAIN APPLICATION ---
 
         function App() {
+            const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+            
             // --- NEW: Word & Phrase Panel State ---
             const [generatedVocab, setGeneratedVocab] = useState(null);
             const [isVocabGenerating, setIsVocabGenerating] = useState(false);
@@ -1142,6 +1198,18 @@ const shareCollection = async (emailToInvite) => {
                 } catch (error) {
                     console.error("Auth error:", error.message);
                     return error.message;
+                }
+            };
+
+            const handleChangePassword = async (newPassword) => {
+                // Supabase handles the secure hashing automatically
+                const { error } = await supabase.auth.updateUser({ password: newPassword });
+                
+                if (error) {
+                    alert("Failed to update password: " + error.message);
+                } else {
+                    alert("Password updated successfully!");
+                    setIsChangePasswordOpen(false);
                 }
             };
 
@@ -1930,7 +1998,24 @@ const shareCollection = async (emailToInvite) => {
                     <CreateCollectionModal isOpen={isCollectionModalOpen} onClose={() => setIsCollectionModalOpen(false)} onCreate={createCollection} />
                     <ShareCollectionModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} onShare={shareCollection} />
                     <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} onLogin={handleAuth} />
-                    <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} apiKey={geminiKey} onSave={saveSettings} />
+                    
+                    <SettingsModal 
+                        isOpen={isSettingsOpen} 
+                        onClose={() => setIsSettingsOpen(false)} 
+                        apiKey={geminiKey} 
+                        onSave={saveSettings} 
+                        
+                        /* NEW PROPS BELOW */
+                        isLoggedIn={!!user} 
+                        onOpenChangePassword={() => setIsChangePasswordOpen(true)} 
+                    />
+
+                    {/* NEW: Change Password Modal */}
+                    <ChangePasswordModal 
+                        isOpen={isChangePasswordOpen} 
+                        onClose={() => setIsChangePasswordOpen(false)} 
+                        onChange={handleChangePassword} 
+                    />
                     <VocabularyModal isOpen={isVocabOpen} onClose={() => setIsVocabOpen(false)} words={vocabulary} onDelete={deleteVocabWord} />
                     <ConfirmModal isOpen={isReplaceConfirmOpen} title="Replace Session?" message="A session already exists for this file. Would you like to replace it?" onConfirm={() => { if (pendingFile) processFileUpload(pendingFile); setIsReplaceConfirmOpen(false); }} onCancel={() => setIsReplaceConfirmOpen(false)} />
 
