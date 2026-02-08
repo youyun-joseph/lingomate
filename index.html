@@ -422,7 +422,7 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
                 ` }] }],
                 generationConfig: { responseMimeType: "application/json" }
             };
-            const data = await callGemini(effectiveKey, "gemini-2.0-flash-exp", body);
+            const data = await callGemini(effectiveKey, "gemini-2.5-flash-preview-09-2025", body);
             return JSON.parse(data.candidates[0].content.parts[0].text);
         };
 
