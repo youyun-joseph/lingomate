@@ -890,7 +890,6 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
                 setCorrectionHint("");
                 setTranslationAttempt("");
                 setShowTranslationAnswer(false);
-                setGeneratedVocab(null);
             }, [source]);
 
             const [shareToastVisible, setShareToastVisible] = useState(false);
@@ -1147,6 +1146,8 @@ const shareCollection = async (emailToInvite) => {
             };
 
             const processFileUpload = async (file) => {
+                setGeneratedVocab(null); // <--- ADD THIS (Clear old vocab)
+                
                 const url = URL.createObjectURL(file);
                 const duration = await getMediaDuration(file);
                 setSource({ type: 'file', mediaType: file.type.startsWith('audio/') ? 'audio' : 'video', url, title: file.name, fileData: file, duration });
@@ -2168,7 +2169,7 @@ const shareCollection = async (emailToInvite) => {
                                                 </div>
                                                 <div className="flex items-center gap-3">
                                                     {loopRange && <button onClick={() => setLoopRange(null)} className="bg-indigo-600 text-white text-[10px] font-bold px-3 py-1.5 rounded-full animate-pulse flex items-center gap-1.5"><RefreshCw size={10} /> Stop loop</button>}
-                                                    <button onClick={() => setSource(null)} className="text-[10px] font-bold text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-md uppercase tracking-wider transition-colors border border-red-100">Close Session</button>
+                                                    <button onClick={() => { setSource(null); setGeneratedVocab(null); }} className="text-[10px] font-bold text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-md uppercase tracking-wider transition-colors border border-red-100">Close Session</button>
                                                 </div>
                                             </div>
 
@@ -2185,7 +2186,7 @@ const shareCollection = async (emailToInvite) => {
                                                 
                                                 <div className="p-6 min-h-[400px]">
                                                     {/* --- SHADOWING TAB --- */}
-                                                    {activeTab === 'Shadowing' && (
+                                                    {activeTab === 'Listen & Repeat' && (
                                                         <div className="space-y-6 fade-in">
                                                             {/* 1. CONTROLS & NAVIGATION */}
                                                             <div className="flex flex-col space-y-4">
