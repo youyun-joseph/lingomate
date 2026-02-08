@@ -820,6 +820,8 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
             const [pendingFile, setPendingFile] = useState(null);
             const [activeTab, setActiveTab] = useState('Shadowing');
             const [chunkSize, setChunkSize] = useState('single'); 
+            // --- NEW: Track which collection the student is viewing ---
+            const [studentViewCollectionId, setStudentViewCollectionId] = useState(null); // null = Show all collections, 'id' = Show videos
 
             const [dictationValues, setDictationValues] = useState({});
             const [dictationChecked, setDictationChecked] = useState(false);
@@ -917,22 +919,19 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
             const autoCollapseTranscript = () => { if (transcriptOpen) setTranscriptOpen(false); };
 
             // OPTIMIZED: Intelligent Panel Management for Mobile
+            // OPTIMIZED: Intelligent Panel Management
             useEffect(() => {
                 if (!source) { 
                     // 1. App Entry / No File Loaded
-                    // UPDATE: Only open Library if not mobile AND user is signed in
-                    setSidebarOpen(!isMobile && !!user); 
+                    // UPDATE: Only open Library if not mobile AND user is signed in AND NOT A STUDENT
+                    setSidebarOpen(!isMobile && !!user && userRole !== 'student'); 
                     setTranscriptOpen(false);
                 } else { 
                     // 2. File Loaded (Entering Audio)
-                    // Always close Library to focus on content.
                     setSidebarOpen(false); 
-                    
-                    // Mobile: Keep Transcript CLOSED so user sees the "Practicing Panel" (Player/Tabs).
-                    // Desktop: Auto-open Transcript only on large screens (XL).
                     setTranscriptOpen(!isMobile && window.innerWidth >= 1280);
                 }
-            }, [source, isMobile, user]); // <--- Added 'user' to dependencies
+            }, [source, isMobile, user, userRole]); // Added userRole dependency
 
             useEffect(() => {
                 setDictationValues({}); setDictationChecked(false); setShowDictationContent(false); setAnalysis(null);
@@ -1002,9 +1001,19 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
             }, [activeCollectionId, user]);
 
             const fetchCollections = async (uid) => {
-    const { data } = await supabase.from('collections').select('*').order('created_at');
-    if (data) setCollections(data);
-};
+                // 1. Fetch Owned Collections
+                const { data: owned } = await supabase.from('collections').select('*').eq('user_id', uid);
+                
+                // 2. Fetch Shared Collections (via collection_members)
+                const { data: sharedRelations } = await supabase.from('collection_members').select('collection_id, collections:collection_id(*)').eq('user_id', uid);
+                
+                const shared = sharedRelations ? sharedRelations.map(r => r.collections) : [];
+                
+                // 3. Combine and Deduplicate
+                const all = [...(owned || []), ...shared].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                
+                setCollections(all);
+            };
 
 const createCollection = async (name) => {
     if (!user) return;
@@ -2183,15 +2192,119 @@ const shareCollection = async (emailToInvite) => {
                                                 </button>
                                             </div>
                                         ) : userRole === 'student' ? (
-                                            // 2. LOGGED IN (Student): Show Student Workspace
-                                            <div className="mt-16 bg-white p-12 border border-gray-100 shadow-sm rounded-3xl text-center">
-                                                <div className="w-16 h-16 bg-gray-50 mx-auto mb-6 flex items-center justify-center rounded-2xl text-gray-400">
-                                                    <BookOpen className="w-8 h-8" />
+                                            // --- STUDENT WORKSPACE UI ---
+                                            <div className="mt-8 px-4 md:px-12 w-full max-w-6xl mx-auto animate-in fade-in duration-500">
+                                                
+                                                {/* HEADER NAVIGATION */}
+                                                <div className="flex items-center gap-4 mb-8">
+                                                    {studentViewCollectionId ? (
+                                                        <button 
+                                                            onClick={() => setStudentViewCollectionId(null)} 
+                                                            className="p-2 bg-white border border-gray-200 rounded-full hover:bg-gray-50 transition-colors shadow-sm"
+                                                        >
+                                                            <ChevronLeft size={24} />
+                                                        </button>
+                                                    ) : (
+                                                        <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
+                                                            <Layers size={24} />
+                                                        </div>
+                                                    )}
+                                                    
+                                                    <div>
+                                                        <h2 className="text-3xl font-extrabold text-gray-900 tracking-tight">
+                                                            {studentViewCollectionId 
+                                                                ? collections.find(c => c.id === studentViewCollectionId)?.name || "Collection" 
+                                                                : "Your Library"}
+                                                        </h2>
+                                                        <p className="text-gray-500 font-medium">
+                                                            {studentViewCollectionId 
+                                                                ? "Select a lesson to begin practice" 
+                                                                : "Choose a collection to explore"}
+                                                        </p>
+                                                    </div>
                                                 </div>
-                                                <h3 className="font-bold text-2xl mb-2 text-gray-900">Student Workspace</h3>
-                                                <p className="text-gray-500 text-sm mb-8 font-normal">
-                                                    Please select a lesson from your Library sidebar to begin practice.
-                                                </p>
+
+                                                {/* CONTENT AREA */}
+                                                {!studentViewCollectionId ? (
+                                                    // VIEW 1: COLLECTIONS GRID
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                                                        {collections.length === 0 ? (
+                                                            <div className="col-span-full py-20 text-center text-gray-400 bg-white rounded-3xl border border-dashed border-gray-200">
+                                                                <Layers size={48} className="mx-auto mb-4 opacity-20" />
+                                                                <p>No collections found.</p>
+                                                            </div>
+                                                        ) : (
+                                                            collections.map(col => (
+                                                                <div 
+                                                                    key={col.id}
+                                                                    onClick={() => setStudentViewCollectionId(col.id)}
+                                                                    className="group bg-white p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl hover:scale-[1.02] transition-all cursor-pointer relative overflow-hidden"
+                                                                >
+                                                                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                                                                        <Layers size={64} />
+                                                                    </div>
+                                                                    <div className="w-12 h-12 bg-gray-50 rounded-2xl flex items-center justify-center mb-4 group-hover:bg-black group-hover:text-white transition-colors">
+                                                                        <BookOpen size={20} />
+                                                                    </div>
+                                                                    <h3 className="text-xl font-bold text-gray-900 mb-1">{col.name}</h3>
+                                                                    <p className="text-sm text-gray-400 font-medium">View Lessons &rarr;</p>
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    // VIEW 2: VIDEOS LIST
+                                                    <div className="space-y-4">
+                                                        {(() => {
+                                                            // Filter history for this collection
+                                                            const lessons = history.filter(h => h.collection_id === studentViewCollectionId);
+                                                            
+                                                            if (lessons.length === 0) return (
+                                                                <div className="py-20 text-center text-gray-400 bg-white rounded-3xl border border-dashed border-gray-200">
+                                                                    <p>No lessons in this collection yet.</p>
+                                                                </div>
+                                                            );
+
+                                                            return lessons.map(item => (
+                                                                <div 
+                                                                    key={item.id} 
+                                                                    onClick={() => loadSession(item)}
+                                                                    className="flex items-center gap-4 p-4 bg-white border border-gray-100 rounded-2xl shadow-sm hover:shadow-md hover:border-black/10 transition-all cursor-pointer group"
+                                                                >
+                                                                    {/* Thumbnail Image Placeholder */}
+                                                                    <div className="w-24 h-16 bg-gray-100 rounded-xl flex-shrink-0 overflow-hidden relative">
+                                                                        {item.source_type === 'video' ? (
+                                                                            <video src={item.source_url} className="w-full h-full object-cover opacity-80" />
+                                                                        ) : (
+                                                                            <div className="w-full h-full flex items-center justify-center bg-indigo-50 text-indigo-300">
+                                                                                <Music size={24} />
+                                                                            </div>
+                                                                        )}
+                                                                        {/* Play Overlay */}
+                                                                        <div className="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-black/0 transition-colors">
+                                                                            <div className="w-8 h-8 bg-white/90 rounded-full flex items-center justify-center shadow-sm backdrop-blur-sm">
+                                                                                <Play size={12} className="ml-0.5 text-black" />
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Info */}
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <h4 className="font-bold text-gray-900 text-lg truncate group-hover:text-indigo-600 transition-colors">{item.title}</h4>
+                                                                        <div className="flex items-center gap-3 mt-1 text-xs font-medium text-gray-500">
+                                                                            <span className="flex items-center gap-1"><Clock size={12}/> {new Date(item.created_at).toLocaleDateString()}</span>
+                                                                            {item.level && <span className="bg-gray-100 px-2 py-0.5 rounded text-gray-600">{item.level}</span>}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <div className="p-2 text-gray-300 group-hover:text-black transition-colors">
+                                                                        <ChevronRight size={20} />
+                                                                    </div>
+                                                                </div>
+                                                            ));
+                                                        })()}
+                                                    </div>
+                                                )}
                                             </div>
                                         ) : (
                                             // 3. LOGGED IN (Teacher/Other): Show Upload
