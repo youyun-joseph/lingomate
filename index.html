@@ -1162,29 +1162,26 @@ const shareCollection = async (emailToInvite) => {
                     const result = await processTranscription(geminiKey, source.fileData, contextPrompt || source.title, source.duration || 0);
                     setTranscript(result);
 
-                    // --- NEW: AUTO-GENERATE VOCABULARY ---
-                    setIsVocabGenerating(true);
-                    const fullText = result.map(t => t.text).join(" ");
-                    
-                    // Run in background (don't await) so UI updates immediately with transcript
-                    fetchKeyVocabulary(geminiKey, fullText)
-                        .then(vocab => setGeneratedVocab(vocab))
-                        .catch(err => console.error("Auto-vocab failed", err))
-                        .finally(() => setIsVocabGenerating(false));
+                    // 2. Process Vocabulary (AI) - NEW STEP
+                    // We do this immediately so we can save it to the DB row
+                    let vocabList = [];
+                    try {
+                        const fullText = result.map(t => t.text).join(" ");
+                        vocabList = await fetchKeyVocabulary(geminiKey, fullText);
+                        setGeneratedVocab(vocabList);
+                    } catch (vocabErr) {
+                        console.warn("Vocab generation failed during initial setup:", vocabErr);
+                    }
                     
                     if (user) {
-                        // 2. SMART CLEANUP: Identify and remove old versions
-                        // Helper: Normalizes titles so "123_Solid_Joys" matches "Solid Joys"
+                        // 3. SMART CLEANUP: Identify and remove old versions
                         const getComparisonName = (t) => {
-                            // Remove 13-digit timestamp prefix if present
                             const noTimestamp = t.replace(/^\d{13}_/, '');
-                            // Sanitize to match file-system naming (underscores, lowercase)
                             return sanitizeFilename(noTimestamp).toLowerCase();
                         };
                         
                         const currentComparisonName = getComparisonName(source.title);
 
-                        // Fetch ALL transcripts to ensure we catch every variation
                         const { data: allUserTranscripts } = await supabase
                             .from('transcripts')
                             .select('id, title, source_url')
@@ -1193,34 +1190,24 @@ const shareCollection = async (emailToInvite) => {
                         let targetId = null;
 
                         if (allUserTranscripts) {
-                            // Filter: Find all DB entries that "mean" the same file
                             const duplicates = allUserTranscripts.filter(t => {
                                 return getComparisonName(t.title) === currentComparisonName;
                             });
 
                             if (duplicates.length > 0) {
-                                // We will reuse the first ID found, and delete the rest
                                 targetId = duplicates[0].id;
-
                                 for (const entry of duplicates) {
-                                    // A. Delete the actual audio file from Storage
+                                    // A. Delete audio file
                                     if (entry.source_url) {
                                         try {
                                             const urlParts = entry.source_url.split('/media/');
                                             if (urlParts.length > 1) {
-                                                // Decode to handle spaces/symbols correctly
-                                                const oldPath = decodeURIComponent(urlParts[1]);
-                                                // Remove any query parameters
-                                                const cleanPath = oldPath.split('?')[0]; 
+                                                const oldPath = decodeURIComponent(urlParts[1]).split('?')[0]; 
                                                 await supabase.storage.from('media').remove([cleanPath]);
-                                                console.log("Cleanup: Deleted old media file:", cleanPath);
                                             }
-                                        } catch (cleanupErr) {
-                                            console.warn("Failed to cleanup storage file:", cleanupErr);
-                                        }
+                                        } catch (e) {}
                                     }
-
-                                    // B. Delete duplicate Database rows (except the one we reuse)
+                                    // B. Delete duplicate DB rows
                                     if (entry.id !== targetId) {
                                         await supabase.from('transcripts').delete().eq('id', entry.id);
                                     }
@@ -1228,37 +1215,32 @@ const shareCollection = async (emailToInvite) => {
                             }
                         }
 
-                        // 3. Upload New File (with unique timestamp to avoid caching)
+                        // 4. Upload New File
                         const sanitizedTitle = sanitizeFilename(source.title);
                         const filePath = `${user.id}/${Date.now()}_${sanitizedTitle}`;
-                        
                         const { error: uploadError } = await supabase.storage.from('media').upload(filePath, source.fileData, { cacheControl: '3600', upsert: true });
                         if (uploadError) throw uploadError;
 
                         const { data: urlData } = supabase.storage.from('media').getPublicUrl(filePath);
 
-                        // 4. Update Database
-                        // We save the CLEAN title (without timestamp) so the Sidebar looks nice
+                        // 5. Update Database (With VOCABULARY)
                         const cleanDisplayTitle = source.title.replace(/^\d{13}_/, '');
-
-                        // ... inside handleGenerate ...
                         
                         const payload = { 
                             user_id: user.id, 
                             collection_id: activeCollectionId === 'default' ? null : activeCollectionId,
-                            level: uploadLevel, // <--- ADD THIS (We will define uploadLevel state next)
+                            level: uploadLevel,
                             title: cleanDisplayTitle, 
                             source_type: source.mediaType, 
                             source_url: urlData.publicUrl, 
-                            content: result 
+                            content: result,
+                            vocabulary: vocabList // <--- SAVING VOCAB HERE
                         };
 
                         if (targetId) {
-                            // Update the existing record we kept
                             await supabase.from('transcripts').update(payload).eq('id', targetId);
                             setSource(prev => ({...prev, id: targetId, title: cleanDisplayTitle}));
                         } else {
-                            // Insert a new record
                             const { data } = await supabase.from('transcripts').insert(payload).select().single();
                             if(data) setSource(prev => ({...prev, id: data.id, title: cleanDisplayTitle}));
                         }
@@ -1655,10 +1637,20 @@ const shareCollection = async (emailToInvite) => {
                 if (!transcript || transcript.length === 0) return;
                 setIsVocabGenerating(true);
                 try {
-                    // Combine all text segments into one string
                     const fullText = transcript.map(t => t.text).join(" ");
                     const res = await fetchKeyVocabulary(geminiKey, fullText);
                     setGeneratedVocab(res);
+
+                    // --- NEW: Update Database if this is a saved session ---
+                    if (user && source?.id) {
+                        const { error } = await supabase
+                            .from('transcripts')
+                            .update({ vocabulary: res })
+                            .eq('id', source.id);
+                        
+                        if (error) console.error("Failed to update vocabulary in DB:", error);
+                        else console.log("Vocabulary updated in DB");
+                    }
                 } catch (err) {
                     console.error(err);
                     alert("Failed to generate vocabulary list. Please try again.");
@@ -1825,11 +1817,21 @@ const shareCollection = async (emailToInvite) => {
             };
 
             const loadSession = (item) => { 
+                // 1. Load Transcript
                 let content = item.content || [];
                 if (typeof content === 'string') {
                     try { content = JSON.parse(content); } catch (e) { content = []; }
                 }
                 setTranscript(Array.isArray(content) ? content : []); 
+                
+                // 2. Load Vocabulary (NEW)
+                let vocab = item.vocabulary || [];
+                if (typeof vocab === 'string') {
+                    try { vocab = JSON.parse(vocab); } catch (e) { vocab = null; }
+                }
+                setGeneratedVocab(vocab && vocab.length > 0 ? vocab : null);
+
+                // 3. Set Source
                 setSource({ id: item.id, type: 'file', mediaType: item.source_type, url: item.source_url, title: item.title, fileData: null }); 
                 setIsPlaying(false); 
             };
