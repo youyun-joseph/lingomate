@@ -400,7 +400,7 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
 
         const fetchKeyVocabulary = async (apiKey, fullTranscriptText) => {
             const effectiveKey = apiKey || DEFAULT_API_KEY;
-            // Limit text context to ~25k chars to fit in prompt, though Gemini Flash handles large context well.
+            // Limit text context to ~25k chars
             const safeText = fullTranscriptText.slice(0, 25000); 
             
             const body = {
@@ -413,11 +413,12 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
                     1. The term or phrase (term)
                     2. Type: 'Word' or 'Phrase' (type)
                     3. Concise definition in English (definition)
-                    4. An example sentence (example)
+                    4. Meaning in Chinese Simplified (chinese)
+                    5. An example sentence from the context or generic (example)
 
                     Text: "${safeText}"
                     
-                    Output strictly JSON: [ { "term": "...", "type": "Word"|"Phrase", "definition": "...", "example": "..." } ]
+                    Output strictly JSON: [ { "term": "...", "type": "Word"|"Phrase", "definition": "...", "chinese": "...", "example": "..." } ]
                 ` }] }],
                 generationConfig: { responseMimeType: "application/json" }
             };
@@ -1160,6 +1161,16 @@ const shareCollection = async (emailToInvite) => {
                     // 1. Process Transcription (AI)
                     const result = await processTranscription(geminiKey, source.fileData, contextPrompt || source.title, source.duration || 0);
                     setTranscript(result);
+
+                    // --- NEW: AUTO-GENERATE VOCABULARY ---
+                    setIsVocabGenerating(true);
+                    const fullText = result.map(t => t.text).join(" ");
+                    
+                    // Run in background (don't await) so UI updates immediately with transcript
+                    fetchKeyVocabulary(geminiKey, fullText)
+                        .then(vocab => setGeneratedVocab(vocab))
+                        .catch(err => console.error("Auto-vocab failed", err))
+                        .finally(() => setIsVocabGenerating(false));
                     
                     if (user) {
                         // 2. SMART CLEANUP: Identify and remove old versions
@@ -1661,13 +1672,13 @@ const shareCollection = async (emailToInvite) => {
                 const { error } = await supabase.from('user_vocabulary').insert([{ 
                     user_id: user.id, 
                     word: item.term, 
-                    definition: item.definition, 
+                    // Save English AND Chinese in the definition column
+                    definition: `${item.definition} (${item.chinese})`, 
                     example: item.example 
                 }]);
                 
                 if (!error) {
                     fetchVocabulary(user.id);
-                    // Optional: Show a mini toast or feedback
                 } else {
                     alert("Error saving: " + error.message);
                 }
@@ -2464,39 +2475,40 @@ const shareCollection = async (emailToInvite) => {
                                                     {/* --- NEW: WORDS & PHRASES TAB --- */}
                                                     {activeTab === 'Words' && (
                                                         <div className="h-full flex flex-col p-6 fade-in min-h-[400px]">
-                                                            {!generatedVocab ? (
+                                                            {/* Loading State */}
+                                                            {isVocabGenerating && !generatedVocab && (
+                                                                <div className="flex flex-col items-center justify-center h-full space-y-4">
+                                                                    <Spinner />
+                                                                    <p className="text-sm text-gray-500 animate-pulse">Analyzing vocabulary...</p>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Empty State (Only if failed or manually cleared) */}
+                                                            {!isVocabGenerating && !generatedVocab && (
                                                                 <div className="flex flex-col items-center justify-center h-full space-y-6 text-center py-12">
-                                                                    <div className="w-16 h-16 bg-indigo-50 text-indigo-500 rounded-2xl flex items-center justify-center">
-                                                                        <Sparkles size={32} />
-                                                                    </div>
-                                                                    <div className="max-w-xs">
-                                                                        <h3 className="text-lg font-bold text-gray-900">AI Vocabulary Analysis</h3>
-                                                                        <p className="text-sm text-gray-500 mt-2">Generate a list of key words and useful phrases (like "put into action") from this specific audio.</p>
-                                                                    </div>
-                                                                    <button 
-                                                                        onClick={handleGenerateVocab} 
-                                                                        disabled={isVocabGenerating}
-                                                                        className="px-8 py-4 bg-black text-white font-bold rounded-2xl hover:bg-gray-800 transition-all shadow-lg flex items-center gap-2 disabled:opacity-70"
-                                                                    >
-                                                                        {isVocabGenerating ? <Spinner /> : <><Wand2 size={18} /> Generate List</>}
+                                                                    <div className="w-16 h-16 bg-indigo-50 text-indigo-500 rounded-2xl flex items-center justify-center"><Sparkles size={32} /></div>
+                                                                    <p className="text-sm text-gray-500">No vocabulary generated yet.</p>
+                                                                    <button onClick={handleGenerateVocab} className="px-8 py-4 bg-black text-white font-bold rounded-2xl hover:bg-gray-800 transition-all shadow-lg flex items-center gap-2">
+                                                                        <Wand2 size={18} /> Generate List
                                                                     </button>
                                                                 </div>
-                                                            ) : (
+                                                            )}
+
+                                                            {/* Results List */}
+                                                            {generatedVocab && (
                                                                 <div className="space-y-6">
                                                                     <div className="flex justify-between items-center">
                                                                         <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2">
                                                                             <Book size={20} className="text-indigo-600"/> Key Terms
                                                                         </h3>
-                                                                        <button onClick={handleGenerateVocab} className="text-xs font-bold text-gray-400 hover:text-indigo-600 flex items-center gap-1">
-                                                                            <RefreshCw size={12}/> Regenerate
+                                                                        <button onClick={handleGenerateVocab} disabled={isVocabGenerating} className="text-xs font-bold text-gray-400 hover:text-indigo-600 flex items-center gap-1">
+                                                                            {isVocabGenerating ? <Spinner/> : <RefreshCw size={12}/>} Regenerate
                                                                         </button>
                                                                     </div>
                                                                     
                                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                                         {generatedVocab.map((item, idx) => {
-                                                                            // Check if already in user's vocab (simple check)
                                                                             const isSaved = vocabulary.some(v => v.word.toLowerCase() === item.term.toLowerCase());
-                                                                            
                                                                             return (
                                                                                 <div key={idx} className="p-5 bg-white border border-gray-100 rounded-2xl shadow-sm hover:shadow-md transition-all group flex flex-col">
                                                                                     <div className="flex justify-between items-start mb-2">
@@ -2515,7 +2527,11 @@ const shareCollection = async (emailToInvite) => {
                                                                                             {isSaved ? <Check size={16} /> : <Plus size={16} />}
                                                                                         </button>
                                                                                     </div>
-                                                                                    <p className="text-sm text-gray-600 font-medium mb-3 leading-relaxed">{item.definition}</p>
+                                                                                    {/* English Definition */}
+                                                                                    <p className="text-sm text-gray-700 font-medium mb-1 leading-relaxed">{item.definition}</p>
+                                                                                    {/* NEW: Chinese Meaning */}
+                                                                                    <p className="text-xs text-indigo-600 font-bold mb-3">{item.chinese}</p>
+                                                                                    
                                                                                     <div className="mt-auto pt-3 border-t border-gray-50">
                                                                                         <p className="text-xs text-gray-500 italic">"{item.example}"</p>
                                                                                     </div>
