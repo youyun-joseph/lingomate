@@ -2439,7 +2439,7 @@ const shareCollection = async (emailToInvite) => {
                                         <div className="space-y-4 fade-in">
                                             {/* UPDATE 2: Sticky Wrapper for Video on Mobile */}
                                             {/* 'sticky top-0' pins it. '-mx-4 px-4' ensures full width. 'z-50' keeps it above text. */}
-                                            <div className={`transition-all ${isMobile && source?.mediaType === 'video' ? 'sticky top-0 z-50 bg-gray-50 -mx-4 px-4 shadow-sm pb-2 pt-2' : ''}`}>
+                                            <div className={`transition-all ${isMobile && source?.mediaType === 'video' ? 'sticky top-0 z-50 bg-gray-50 -mx-4 shadow-sm' : ''}`}>
                                                 <SmartPlayer source={source} isPlaying={isPlaying} setIsPlaying={setIsPlaying} seekTime={currentTime} onTimeUpdate={handleTimeUpdate} loopRange={loopRange} seekTrigger={seekTrigger} />
                                             </div>
                                             
