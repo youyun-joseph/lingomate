@@ -2152,13 +2152,10 @@ const shareCollection = async (emailToInvite) => {
                         <div onClick={() => setSidebarOpen(false)} className="fixed inset-0 bg-black/50 z-30 backdrop-blur-sm transition-opacity fade-in" />
                     )}
                     <aside className={`
-                        bg-white flex flex-col overflow-hidden
-                        ${isMobile 
-                            /* Mobile: Bottom Sheet Style (Matches Transcript) */
-                            ? `fixed inset-x-0 bottom-0 z-[60] w-full h-[70vh] rounded-t-3xl shadow-[0_-8px_30px_rgba(0,0,0,0.12)] transition-transform duration-300 ease-out ${sidebarOpen ? 'translate-y-0' : 'translate-y-full'}`
-                            /* Desktop: Sidebar Style */
-                            : `relative h-full transition-all duration-300 ease-in-out border-r ${sidebarOpen ? 'w-80 translate-x-0' : 'w-0 -translate-x-full'}`
-                        }
+                        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0 lg:w-0 lg:border-none'} 
+                        ${isMobile ? 'fixed inset-y-0 left-0 z-40 w-80 shadow-2xl' : 'relative transition-all duration-300 ease-in-out border-r'}
+                        ${!isMobile && sidebarOpen ? 'w-80' : ''}
+                        bg-white flex flex-col overflow-hidden h-full
                     `}>
                             <div className="p-4 border-b bg-gray-50 space-y-3 min-w-[320px]">
                                 <div className="flex justify-between items-center">
@@ -2244,20 +2241,21 @@ const shareCollection = async (emailToInvite) => {
                         </aside>
 
                         <main className="flex-1 flex flex-col min-w-0 bg-gray-50 overflow-hidden relative">
-                            {/* NEW: Mobile Toolbar (Library & Transcript) */}
-                            {isMobile && (
-                                <div className="flex gap-3 mt-4 mb-2 animate-in fade-in slide-in-from-bottom-2">
-                                    <button 
-                                        onClick={() => setSidebarOpen(true)} 
-                                        className="flex-1 py-3 bg-white border border-gray-200 rounded-2xl shadow-sm font-bold text-xs uppercase tracking-widest text-gray-600 flex items-center justify-center gap-2 hover:bg-gray-50 active:scale-95 transition-all"
-                                    >
-                                        <Layers size={16} className="text-indigo-500" /> Library
+                            {/* Toggle Button: Library */}
+                            {(!sidebarOpen || isMobile) && (
+                                <div className="absolute top-4 left-4 z-60">
+                                    <button onClick={() => setSidebarOpen(true)} className="p-3 bg-white/50 backdrop-blur border border-gray-200 rounded-full text-gray-600 shadow-lg hover:bg-gray-50 flex items-center gap-2 px-4 font-bold text-xs uppercase tracking-widest transition-transform hover:scale-105 active:scale-95">
+                                        <History className="w-4 h-4" /> <span className="hidden sm:inline">Library</span>
                                     </button>
-                                    <button 
-                                        onClick={() => setTranscriptOpen(true)} 
-                                        className="flex-1 py-3 bg-white border border-gray-200 rounded-2xl shadow-sm font-bold text-xs uppercase tracking-widest text-gray-600 flex items-center justify-center gap-2 hover:bg-gray-50 active:scale-95 transition-all"
-                                    >
-                                        <FileText size={16} className="text-emerald-500" /> Transcript
+                                </div>
+                            )}
+                            
+                            {/* Toggle Button: Transcript */}
+                            {(!transcriptOpen || isMobile) && transcript.length > 0 && (
+                                <div className="absolute top-4 right-4 z-90">
+                                    <button onClick={() => setTranscriptOpen(true)} className="p-3 bg-white/50 backdrop-blur border border-gray-200 rounded-full text-gray-600 shadow-lg hover:bg-gray-50 flex items-center gap-2 px-4 font-bold text-xs uppercase tracking-widest transition-transform hover:scale-105 active:scale-95">
+                                        {/* Changed: Always show text 'Show Transcript' on mobile */}
+                                    <span>Show Transcript</span> <FileText className="w-4 h-4" />
                                     </button>
                                 </div>
                             )}
@@ -2456,24 +2454,6 @@ const shareCollection = async (emailToInvite) => {
                                                     <button onClick={() => { setSource(null); setGeneratedVocab(null); }} className="text-[10px] font-bold text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-md uppercase tracking-wider transition-colors border border-red-100">Close Session</button>
                                                 </div>
                                             </div>
-
-                                            {/* NEW: Mobile Toolbar (Library & Transcript) */}
-                                            {isMobile && (
-                                                <div className="flex gap-3 mt-4 mb-2 animate-in fade-in slide-in-from-bottom-2">
-                                                    <button 
-                                                        onClick={() => setSidebarOpen(true)} 
-                                                        className="flex-1 py-3 bg-white border border-gray-200 rounded-2xl shadow-sm font-bold text-xs uppercase tracking-widest text-gray-600 flex items-center justify-center gap-2 hover:bg-gray-50 active:scale-95 transition-all"
-                                                    >
-                                                        <Layers size={16} className="text-indigo-500" /> Library
-                                                    </button>
-                                                    <button 
-                                                        onClick={() => setTranscriptOpen(true)} 
-                                                        className="flex-1 py-3 bg-white border border-gray-200 rounded-2xl shadow-sm font-bold text-xs uppercase tracking-widest text-gray-600 flex items-center justify-center gap-2 hover:bg-gray-50 active:scale-95 transition-all"
-                                                    >
-                                                        <FileText size={16} className="text-emerald-500" /> Transcript
-                                                    </button>
-                                                </div>
-                                            )}
 
                                             <div className="bg-white border border-gray-100 rounded-3xl overflow-hidden shadow-sm flex flex-col mt-2">
                                                 {/* 1. UPDATED TABS LIST (Removed Grammar, Added Summary) */}
