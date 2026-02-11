@@ -2174,7 +2174,13 @@ const shareCollection = async (emailToInvite) => {
                                 <div className="flex gap-2">
                                     <select 
                                         value={activeCollectionId} 
-                                        onChange={(e) => setActiveCollectionId(e.target.value)} 
+                                        onChange={(e) => {
+                                            setActiveCollectionId(e.target.value);
+                                            // Sync main workspace view if the user is a student
+                                            if (userRole === 'student') {
+                                                setStudentViewCollectionId(e.target.value === 'default' ? null : e.target.value);
+                                            }
+                                        }}
                                         className="flex-1 bg-white border border-gray-200 text-xs font-bold rounded-xl px-3 py-2 outline-none focus:border-black cursor-pointer"
                                     >
                                         {/* UPDATE: Hide Default Collection if user is a Student */}
@@ -2230,9 +2236,15 @@ const shareCollection = async (emailToInvite) => {
                                                                 <span>{new Date(item.created_at).toLocaleDateString()}</span>
                                                             </div>
                                                             <div className="absolute top-2.5 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                <button onClick={(e) => { e.stopPropagation(); handleShare(item); }} title="Share" className={`p-1 transition-colors ${source?.id === item.id ? 'text-gray-300 hover:text-white' : 'text-gray-400 hover:text-black'}`}><Share2 size={14} /></button>
-                                                                <button onClick={(e) => handleDeleteSession(e, item)} title="Delete" className={`p-1 transition-colors ${source?.id === item.id ? 'text-gray-300 hover:text-red-400' : 'text-gray-400 hover:text-red-500'}`}><Trash2 size={14} /></button>
+                                                                {/* Only the OWNER can share or delete the file */}
+                                                                {item.user_id === user.id && (
+                                                                    <>
+                                                                        <button onClick={(e) => { e.stopPropagation(); handleShare(item); }} title="Share" className={`p-1 transition-colors ${source?.id === item.id ? 'text-gray-300 hover:text-white' : 'text-gray-400 hover:text-black'}`}><Share2 size={14} /></button>
+                                                                        <button onClick={(e) => handleDeleteSession(e, item)} title="Delete" className={`p-1 transition-colors ${source?.id === item.id ? 'text-gray-300 hover:text-red-400' : 'text-gray-400 hover:text-red-500'}`}><Trash2 size={14} /></button>
+                                                                    </>
+                                                                )}
                                                             </div>
+
                                                         </div>
                                                     ))}
                                                 </div>
@@ -2286,9 +2298,12 @@ const shareCollection = async (emailToInvite) => {
                                                 <div className="flex items-center gap-4 mb-8">
                                                     {studentViewCollectionId ? (
                                                         <button 
-                                                            onClick={() => setStudentViewCollectionId(null)} 
-                                                            className="p-2 bg-white border border-gray-200 rounded-full hover:bg-gray-50 transition-colors shadow-sm"
-                                                        >
+                                                                onClick={() => {
+                                                                    setStudentViewCollectionId(null);
+                                                                    setActiveCollectionId('default'); // <--- Resets folder fetch
+                                                                }} 
+                                                                className="p-2 bg-white border border-gray-200 rounded-full hover:bg-gray-50 transition-colors shadow-sm"
+                                                            >
                                                             <ChevronLeft size={24} />
                                                         </button>
                                                     ) : (
@@ -2324,7 +2339,10 @@ const shareCollection = async (emailToInvite) => {
                                                             collections.map(col => (
                                                                 <div 
                                                                     key={col.id}
-                                                                    onClick={() => setStudentViewCollectionId(col.id)}
+                                                                    onClick={() => {
+                                                                        setStudentViewCollectionId(col.id);
+                                                                        setActiveCollectionId(col.id); // <--- Triggers DB fetch for this folder
+                                                                    }}
                                                                     className="group bg-white p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl hover:scale-[1.02] transition-all cursor-pointer relative overflow-hidden"
                                                                 >
                                                                     <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
