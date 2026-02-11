@@ -2152,10 +2152,13 @@ const shareCollection = async (emailToInvite) => {
                         <div onClick={() => setSidebarOpen(false)} className="fixed inset-0 bg-black/50 z-30 backdrop-blur-sm transition-opacity fade-in" />
                     )}
                     <aside className={`
-                        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0 lg:w-0 lg:border-none'} 
-                        ${isMobile ? 'fixed inset-y-0 left-0 z-40 w-80 shadow-2xl' : 'relative transition-all duration-300 ease-in-out border-r'}
-                        ${!isMobile && sidebarOpen ? 'w-80' : ''}
-                        bg-white flex flex-col overflow-hidden h-full
+                        bg-white flex flex-col overflow-hidden
+                        ${isMobile 
+                            /* Mobile: Bottom Sheet Style */
+                            ? `fixed inset-x-0 bottom-0 z-[70] w-full h-[75vh] rounded-t-3xl shadow-[0_-8px_30px_rgba(0,0,0,0.12)] transition-transform duration-300 ease-out ${sidebarOpen ? 'translate-y-0' : 'translate-y-full'}`
+                            /* Desktop: Standard Sidebar Style */
+                            : `relative h-full transition-all duration-300 ease-in-out border-r ${sidebarOpen ? 'w-80 translate-x-0' : 'w-0 -translate-x-full'}`
+                        }
                     `}>
                             <div className="p-4 border-b bg-gray-50 space-y-3 min-w-[320px]">
                                 <div className="flex justify-between items-center">
@@ -2863,14 +2866,14 @@ const shareCollection = async (emailToInvite) => {
                         </main>
 
                         <aside className={`
-                        bg-white flex flex-col overflow-hidden
-                        ${isMobile 
-                            /* Mobile: Bottom Sheet Style */
-                            ? `fixed inset-x-0 bottom-0 z-[70] w-full h-[75vh] rounded-t-3xl shadow-[0_-8px_30px_rgba(0,0,0,0.12)] transition-transform duration-300 ease-out ${sidebarOpen ? 'translate-y-0' : 'translate-y-full'}`
-                            /* Desktop: Standard Sidebar Style */
-                            : `relative h-full transition-all duration-300 ease-in-out border-r ${sidebarOpen ? 'w-80 translate-x-0' : 'w-0 -translate-x-full'}`
-                        }
-                    `}>
+                            bg-white flex flex-col overflow-hidden
+                            ${isMobile 
+                                /* Mobile: Bottom Sheet (60% Height, Slide Up/Down) */
+                                ? `fixed inset-x-0 bottom-0 z-40 w-full h-[60vh] rounded-t-3xl shadow-[0_-8px_30px_rgba(0,0,0,0.12)] transition-transform duration-300 ease-out ${transcriptOpen ? 'translate-y-0' : 'translate-y-full'}`
+                                /* Desktop: Side Panel (Full Height, Slide Left/Right) */
+                                : `relative h-full transition-all duration-300 ease-in-out border-l ${transcriptOpen ? 'w-[450px] translate-x-0' : 'w-0 translate-x-full lg:w-0 lg:border-none'}`
+                            }
+                        `}>
                             <div className="p-4 border-b bg-gray-50 flex justify-between items-center whitespace-nowrap w-full md:min-w-[450px]">
                                 <h2 className="font-bold text-sm text-gray-600 flex items-center gap-2"><FileText size={16} /> Full Transcript</h2>
                                 <div className="flex items-center gap-2">
