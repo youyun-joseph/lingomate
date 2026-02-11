@@ -874,7 +874,7 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
             const [contextPrompt, setContextPrompt] = useState("");
             const [geminiKey, setGeminiKey] = useState("");
             const [pendingFile, setPendingFile] = useState(null);
-            const [activeTab, setActiveTab] = useState('Shadowing');
+            const [activeTab, setActiveTab] = useState('Listen & Repeat');
             const [chunkSize, setChunkSize] = useState('single'); 
             // --- NEW: Track which collection the student is viewing ---
             const [studentViewCollectionId, setStudentViewCollectionId] = useState(null); // null = Show all collections, 'id' = Show videos
@@ -1706,7 +1706,7 @@ const shareCollection = async (emailToInvite) => {
                     const res = await fetchMeaningAndGrammar(geminiKey, sentence);
                     setAnalysis({ ...res, content: sentence });
                     setIsAnalyzing(false);
-                    if (activeTab === 'Shadowing') setActiveTab('Meaning and Grammar');
+                    if (activeTab === 'Listen & Repeat') setActiveTab('Translation');
                 } catch (err) { console.error(err); setIsAnalyzing(false); }
             };
 
@@ -1902,7 +1902,7 @@ const shareCollection = async (emailToInvite) => {
                 setIsSavingRecord(true);
 
                 try {
-                    const isShadowing = activeTab === 'Shadowing' && source;
+                    const isShadowing = activeTab === 'Listen & Repeat' && source;
                     const isSummary = activeTab === 'Summary' && source;
 
                     // 4. Determine Title based on Active Tab
