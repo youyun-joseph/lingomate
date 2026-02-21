@@ -874,6 +874,7 @@ Output strictly JSON: { "translation": "...", "explanation": "...", "grammar": "
             const [contextPrompt, setContextPrompt] = useState("");
             const [geminiKey, setGeminiKey] = useState("");
             const [pendingFile, setPendingFile] = useState(null);
+            const [bulkProgress, setBulkProgress] = useState(null);
             const [activeTab, setActiveTab] = useState('Listen & Repeat');
             const [chunkSize, setChunkSize] = useState('single'); 
             // --- NEW: Track which collection the student is viewing ---
@@ -1214,12 +1215,93 @@ const shareCollection = async (emailToInvite) => {
             };
 
             const handleFileUpload = async (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const existing = history.find(h => h.title === file.name);
-                if (existing) { setPendingFile(file); setIsReplaceConfirmOpen(true); } 
-                else { processFileUpload(file); }
-            };
+             const files = Array.from(e.target.files);
+             if (files.length === 0) return;
+
+             if (files.length > 1) {
+                 // User selected multiple files -> Trigger Bulk Flow
+                 handleBulkProcess(files);
+             } else {
+                 // User selected 1 file -> Original Single File Flow
+                 const file = files[0];
+                 const existing = history.find(h => h.title === file.name);
+                 if (existing) { setPendingFile(file); setIsReplaceConfirmOpen(true); } 
+                 else { processFileUpload(file); }
+             }
+         };
+
+            // --- NEW: Helper to process a single file in background ---
+         const processAndSaveFile = async (file) => {
+             const duration = await getMediaDuration(file);
+             const title = file.name;
+             const cleanDisplayTitle = title.replace(/^\d{13}_/, '').replace(/\.[^/.]+$/, "");
+
+             // 1. Transcribe (AI)
+             const transcriptResult = await processTranscription(geminiKey, file, title, duration);
+             const fullText = transcriptResult.map(t => t.text).join(" ");
+
+             // 2. Vocabulary (AI)
+             let vocabList = [];
+             try {
+                 vocabList = await fetchKeyVocabulary(geminiKey, fullText);
+             } catch (e) { console.warn("Vocab failed for", title); }
+
+             // 3. Smart Cleanup (Overwrite existing if same name)
+             const sanitizedTitle = sanitizeFilename(title);
+             const getComparisonName = (t) => t.replace(/^\d{13}_/, '').toLowerCase();
+             const currentName = getComparisonName(title);
+
+             const { data: existing } = await supabase.from('transcripts').select('id, title, source_url').eq('user_id', user.id);
+             if (existing) {
+                 const dups = existing.filter(x => getComparisonName(x.title) === currentName);
+                 for (const dup of dups) {
+                     await supabase.from('transcripts').delete().eq('id', dup.id);
+                     if (dup.source_url) {
+                         try {
+                             const path = decodeURIComponent(dup.source_url.split('/media/')[1]).split('?')[0];
+                             await supabase.storage.from('media').remove([path]);
+                         } catch (e) {}
+                     }
+                 }
+             }
+
+             // 4. Upload Media
+             const filePath = `${user.id}/${Date.now()}_${sanitizedTitle}`;
+             const { error: uploadError } = await supabase.storage.from('media').upload(filePath, file, { cacheControl: '3600', upsert: true });
+             if (uploadError) throw uploadError;
+             const { data: urlData } = supabase.storage.from('media').getPublicUrl(filePath);
+
+             // 5. Save to DB
+             await supabase.from('transcripts').insert({
+                 user_id: user.id,
+                 collection_id: activeCollectionId === 'default' ? null : activeCollectionId,
+                 level: uploadLevel,
+                 title: cleanDisplayTitle,
+                 source_type: file.type.startsWith('audio/') ? 'audio' : 'video',
+                 source_url: urlData.publicUrl,
+                 content: transcriptResult,
+                 vocabulary: vocabList
+             });
+         };
+
+         // --- NEW: Bulk Handler ---
+         const handleBulkProcess = async (files) => {
+             if (!user) return alert("Please sign in to use bulk upload.");
+             if (!geminiKey) return alert("Please set your Gemini API Key in settings first.");
+
+             setBulkProgress({ current: 0, total: files.length, filename: "" });
+
+             for (let i = 0; i < files.length; i++) {
+                 const file = files[i];
+                 setBulkProgress({ current: i + 1, total: files.length, filename: file.name });
+                 try { await processAndSaveFile(file); } catch (error) { console.error("Failed to process " + file.name, error); }
+             }
+
+             setBulkProgress(null);
+             fetchHistory(); 
+             alert(`Bulk processing complete! ${files.length} files added.`);
+         };
+
 
             const processFileUpload = async (file) => {
                 setGeneratedVocab(null); // <--- ADD THIS (Clear old vocab)
@@ -2018,6 +2100,32 @@ const shareCollection = async (emailToInvite) => {
                     />
                     <VocabularyModal isOpen={isVocabOpen} onClose={() => setIsVocabOpen(false)} words={vocabulary} onDelete={deleteVocabWord} />
                     <ConfirmModal isOpen={isReplaceConfirmOpen} title="Replace Session?" message="A session already exists for this file. Would you like to replace it?" onConfirm={() => { if (pendingFile) processFileUpload(pendingFile); setIsReplaceConfirmOpen(false); }} onCancel={() => setIsReplaceConfirmOpen(false)} />
+                    
+                    {/* --- NEW: Bulk Progress Modal --- */}
+                 {bulkProgress && (
+                     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm fade-in">
+                         <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center space-y-6">
+                             <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto animate-pulse">
+                                 <Sparkles size={32} />
+                             </div>
+                             <div>
+                                 <h2 className="text-2xl font-bold text-gray-900 mb-2">Processing Files...</h2>
+                                 <p className="text-gray-500 font-medium">
+                                     Analyzing {bulkProgress.current} of {bulkProgress.total}
+                                 </p>
+                             </div>
+                             <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                                 <div 
+                                     className="bg-indigo-600 h-full transition-all duration-500" 
+                                     style={{ width: `${(bulkProgress.current / bulkProgress.total) * 100}%` }} 
+                                 />
+                             </div>
+                             <p className="text-xs text-gray-400 font-mono truncate px-4">
+                                 Current: {bulkProgress.filename}
+                             </p>
+                         </div>
+                     </div>
+                 )}
 
                     {shareToastVisible && (
                         <div className="share-toast px-6 py-3 bg-emerald-600 text-white rounded-full shadow-2xl font-bold flex items-center gap-2">
@@ -2417,7 +2525,7 @@ const shareCollection = async (emailToInvite) => {
                                                 <div className="w-16 h-16 bg-gray-50 mx-auto mb-6 flex items-center justify-center group-hover:bg-black rounded-2xl"><Upload className="w-8 h-8" /></div>
                                                 <h3 className="font-bold text-2xl mb-2 text-gray-900">Analyze media</h3>
                                                 <p className="text-gray-500 text-sm mb-8 font-normal">Upload an audio or video file to start practice.</p>
-                                                <label className="block w-full bg-black text-white py-4 font-bold rounded-2xl cursor-pointer hover:bg-gray-800 shadow-lg">Select file<input type="file" className="hidden" accept="video/*,audio/*" onChange={handleFileUpload} /></label>
+                                                <label className="block w-full bg-black text-white py-4 font-bold rounded-2xl cursor-pointer hover:bg-gray-800 shadow-lg">Select file<input type="file" multiple className="hidden" accept="video/*,audio/*" onChange={handleFileUpload} /></label>
                                             </div>
                                         )
                                     ) : transcript.length === 0 ? (
