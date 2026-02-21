@@ -2398,8 +2398,8 @@ const shareCollection = async (emailToInvite) => {
                                                     <User size={20} /> Sign In to Get Started
                                                 </button>
                                             </div>
-                                        ) : userRole === 'student' ? (
-                                            // --- STUDENT WORKSPACE UI ---
+                                        ) : (
+                                            // 2. LOGGED IN WORKSPACE (Teachers & Students)
                                             <div className="mt-8 px-4 md:px-12 w-full max-w-6xl mx-auto animate-in fade-in duration-500">
                                                 
                                                 {/* HEADER NAVIGATION */}
@@ -2408,7 +2408,7 @@ const shareCollection = async (emailToInvite) => {
                                                         <button 
                                                                 onClick={() => {
                                                                     setStudentViewCollectionId(null);
-                                                                    setActiveCollectionId('default'); // <--- Resets folder fetch
+                                                                    setActiveCollectionId('default'); // Resets folder fetch
                                                                 }} 
                                                                 className="p-2 bg-white border border-gray-200 rounded-full hover:bg-gray-50 transition-colors shadow-sm"
                                                             >
@@ -2426,12 +2426,22 @@ const shareCollection = async (emailToInvite) => {
                                                                 ? collections.find(c => c.id === studentViewCollectionId)?.name || "Collection" 
                                                                 : "Your Library"}
                                                         </h2>
-                                                        <p className="text-gray-500 font-medium">
+                                                        <p className="text-gray-500 font-medium hidden sm:block">
                                                             {studentViewCollectionId 
                                                                 ? "Select a lesson to begin practice" 
                                                                 : "Choose a collection to explore"}
                                                         </p>
                                                     </div>
+
+                                                    {/* NEW: Upload Button for Teachers (Right-aligned) */}
+                                                    {userRole === 'teacher' && (
+                                                        <div className="ml-auto">
+                                                            <label className="flex items-center gap-2 px-4 sm:px-6 py-3 bg-black text-white font-bold text-sm rounded-2xl cursor-pointer hover:bg-gray-800 shadow-md transition-all active:scale-95">
+                                                                <Upload size={18} /> <span className="hidden sm:inline">Upload Media</span>
+                                                                <input type="file" multiple className="hidden" accept="video/*,audio/*" onChange={handleFileUpload} />
+                                                            </label>
+                                                        </div>
+                                                    )}
                                                 </div>
 
                                                 {/* CONTENT AREA */}
@@ -2439,9 +2449,14 @@ const shareCollection = async (emailToInvite) => {
                                                     // VIEW 1: COLLECTIONS GRID
                                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                                                         {collections.length === 0 ? (
-                                                            <div className="col-span-full py-20 text-center text-gray-400 bg-white rounded-3xl border border-dashed border-gray-200">
-                                                                <Layers size={48} className="mx-auto mb-4 opacity-20" />
+                                                            <div className="col-span-full py-20 text-center text-gray-400 bg-white rounded-3xl border border-dashed border-gray-200 flex flex-col items-center justify-center gap-4">
+                                                                <Layers size={48} className="opacity-20" />
                                                                 <p>No collections found.</p>
+                                                                {userRole === 'teacher' && (
+                                                                    <button onClick={() => setIsCollectionModalOpen(true)} className="px-6 py-2 bg-gray-100 text-gray-700 rounded-xl font-bold text-sm hover:bg-gray-200 transition-colors">
+                                                                        Create your first collection
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         ) : (
                                                             collections.map(col => (
@@ -2449,7 +2464,7 @@ const shareCollection = async (emailToInvite) => {
                                                                     key={col.id}
                                                                     onClick={() => {
                                                                         setStudentViewCollectionId(col.id);
-                                                                        setActiveCollectionId(col.id); // <--- Triggers DB fetch for this folder
+                                                                        setActiveCollectionId(col.id); // Triggers DB fetch for this folder
                                                                     }}
                                                                     className="group bg-white p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl hover:scale-[1.02] transition-all cursor-pointer relative overflow-hidden"
                                                                 >
@@ -2473,8 +2488,14 @@ const shareCollection = async (emailToInvite) => {
                                                             const lessons = history.filter(h => h.collection_id === studentViewCollectionId);
                                                             
                                                             if (lessons.length === 0) return (
-                                                                <div className="py-20 text-center text-gray-400 bg-white rounded-3xl border border-dashed border-gray-200">
+                                                                <div className="py-20 text-center text-gray-400 bg-white rounded-3xl border border-dashed border-gray-200 flex flex-col items-center gap-4">
                                                                     <p>No lessons in this collection yet.</p>
+                                                                    {userRole === 'teacher' && (
+                                                                        <label className="px-6 py-2 bg-gray-100 text-gray-700 rounded-xl font-bold text-sm hover:bg-gray-200 transition-colors cursor-pointer">
+                                                                            Upload Media Here
+                                                                            <input type="file" multiple className="hidden" accept="video/*,audio/*" onChange={handleFileUpload} />
+                                                                        </label>
+                                                                    )}
                                                                 </div>
                                                             );
 
@@ -2518,14 +2539,6 @@ const shareCollection = async (emailToInvite) => {
                                                         })()}
                                                     </div>
                                                 )}
-                                            </div>
-                                        ) : (
-                                            // 3. LOGGED IN (Teacher/Other): Show Upload
-                                            <div className="mt-16 bg-white p-12 border border-gray-100 shadow-sm rounded-3xl text-center group">
-                                                <div className="w-16 h-16 bg-gray-50 mx-auto mb-6 flex items-center justify-center group-hover:bg-black rounded-2xl"><Upload className="w-8 h-8" /></div>
-                                                <h3 className="font-bold text-2xl mb-2 text-gray-900">Analyze media</h3>
-                                                <p className="text-gray-500 text-sm mb-8 font-normal">Upload an audio or video file to start practice.</p>
-                                                <label className="block w-full bg-black text-white py-4 font-bold rounded-2xl cursor-pointer hover:bg-gray-800 shadow-lg">Select file<input type="file" multiple className="hidden" accept="video/*,audio/*" onChange={handleFileUpload} /></label>
                                             </div>
                                         )
                                     ) : transcript.length === 0 ? (
