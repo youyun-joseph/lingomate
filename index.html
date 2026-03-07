@@ -2015,44 +2015,51 @@ const shareCollection = async (emailToInvite) => {
         };
 
             const saveRecording = async (blobInput) => {
-                // 1. Accept blob directly (from Auto-Save) or fall back to state
                 const blobToUse = blobInput instanceof Blob ? blobInput : recordedBlob;
                 if (!blobToUse) return;
                 
-                // 2. Lock to prevent duplicates
                 if (saveLockRef.current) return; 
                 saveLockRef.current = true;
                 
-                // 3. Auth Check
                 if (!user) {
                     alert("Please sign in to save your recordings.");
                     saveLockRef.current = false; 
                     return;
                 }
                 
-                setIsSavingRecord(true);
+                const isShadowing = activeTab === 'Listen & Repeat' && source;
+                const isSummary = activeTab === 'Summary' && source;
 
+                const shadowingBaseName = `Shadowing - ${source?.title} - S${activeIndex} -`;
+                const summaryBaseName = `Summary - ${source?.title}`;
+
+                let title = `Recording ${new Date().toLocaleString()}`;
+                if (isShadowing) title = `${shadowingBaseName}${Date.now()}`;
+                else if (isSummary) title = `${summaryBaseName} - ${Date.now()}`;
+
+                // --- NEW: 1. OPTIMISTIC UI (Instant Local Render) ---
+                const tempId = `temp-${Date.now()}`;
+                const localUrl = URL.createObjectURL(blobToUse);
+                
+                const optimisticRecord = {
+                    id: tempId,
+                    user_id: user.id,
+                    title: title,
+                    file_url: localUrl,
+                    created_at: new Date().toISOString(),
+                    isSyncing: true // Flag to show "Saving..." in UI
+                };
+                
+                // Add to list immediately & clear recording state
+                setRecordingsList(prev => [optimisticRecord, ...prev]);
+                setRecordedBlob(null);
+
+                // --- 2. BACKGROUND SYNC (Supabase) ---
                 try {
-                    const isShadowing = activeTab === 'Listen & Repeat' && source;
-                    const isSummary = activeTab === 'Summary' && source;
-
-                    // 4. Determine Title based on Active Tab
-                    let title = `Recording ${new Date().toLocaleString()}`;
-                    const shadowingBaseName = `Shadowing - ${source?.title} - S${activeIndex} -`;
-                    const summaryBaseName = `Summary - ${source?.title}`;
-
-                    if (isShadowing) {
-                        title = `${shadowingBaseName}${Date.now()}`;
-                    } else if (isSummary) {
-                        title = `${summaryBaseName} - ${Date.now()}`;
-                    }
-
-                    // 5. Upload File
                     const path = `${user.id}/recordings/${Date.now()}.webm`;
                     const { error: uploadError } = await supabase.storage.from('media').upload(path, blobToUse);
                     if (uploadError) throw new Error("Upload failed: " + uploadError.message);
                     
-                    // 6. Save to Database
                     const { data: urlData } = supabase.storage.from('media').getPublicUrl(path);
                     const { data: newRecord, error: dbError } = await supabase.from('user_recordings').insert([{ 
                         user_id: user.id, 
@@ -2062,40 +2069,38 @@ const shareCollection = async (emailToInvite) => {
                     
                     if (dbError) throw new Error("Database save failed: " + dbError.message);
 
-                    // 7. CLEANUP: Enforce Limits
-                    // A. Shadowing Limit: 1 per sentence
+                    // 3. SWAP LOCAL FOR CLOUD
+                    setRecordingsList(prev => prev.map(r => r.id === tempId ? newRecord : r));
+
+                    // 4. CLEANUP OLD RECORDINGS
                     if (isShadowing && newRecord) {
-                        const { data: duplicates } = await supabase.from('user_recordings').select('id, file_url').eq('user_id', user.id).ilike('title', `${shadowingBaseName}%`);
+                        const { data: duplicates } = await supabase.from('user_recordings').select('id').eq('user_id', user.id).ilike('title', `${shadowingBaseName}%`);
                         if (duplicates && duplicates.length > 0) {
                             const idsToDelete = duplicates.filter(r => r.id !== newRecord.id).map(r => r.id);
                             if (idsToDelete.length > 0) {
                                 await supabase.from('user_recordings').delete().in('id', idsToDelete);
-                                // Optional: Delete old files from storage here to save space
+                                setRecordingsList(prev => prev.filter(r => !idsToDelete.includes(r.id))); // Remove from UI
                             }
                         }
                     }
 
-                    // B. Summary Limit: 2 per audio
                     if (isSummary && newRecord) {
                          const { data: summaries } = await supabase.from('user_recordings').select('id').eq('user_id', user.id).ilike('title', `${summaryBaseName}%`).order('created_at', { ascending: false });
                          if (summaries && summaries.length > 2) {
-                             // Keep the top 2 (newest), delete the rest
                              const idsToDelete = summaries.slice(2).map(r => r.id);
                              if (idsToDelete.length > 0) {
                                  await supabase.from('user_recordings').delete().in('id', idsToDelete);
+                                 setRecordingsList(prev => prev.filter(r => !idsToDelete.includes(r.id))); // Remove from UI
                              }
                          }
                     }
 
-                    // 8. Refresh & Reset
-                    await fetchRecordings(user.id);
-                    setRecordedBlob(null); // Clear "unsaved" state
-
                 } catch (err) {
                     console.error(err);
+                    // Remove the broken local recording if cloud fails
+                    setRecordingsList(prev => prev.filter(r => r.id !== tempId));
                     alert("Error saving recording: " + err.message);
                 } finally {
-                    setIsSavingRecord(false);
                     saveLockRef.current = false;
                 }
             };
@@ -2767,13 +2772,7 @@ const shareCollection = async (emailToInvite) => {
                                                                         <button onClick={startRecording} className="flex-1 flex items-center justify-center gap-2 py-3 bg-white border border-gray-200 text-gray-700 font-bold text-xs uppercase rounded-xl hover:bg-gray-100 transition-all"><Circle size={12} className="text-red-500 fill-current" /> Start recording</button>
                                                                     ) : (
                                                                         <button onClick={stopRecording} className="flex-1 flex items-center justify-center gap-2 py-3 bg-red-500 text-white font-bold text-xs uppercase rounded-xl hover:bg-red-600 transition-all animate-pulse"><Square size={12} className="fill-current" /> Stop recording</button>
-                                                                    )}
-                                                                    {/* Auto-save indicator */}
-                                                                    {isSavingRecord && (
-                                                                         <div className="flex items-center gap-2 px-4 py-3 bg-gray-50 rounded-xl border border-gray-100">
-                                                                             <Spinner /> <span className="text-xs font-bold text-gray-500">Saving...</span>
-                                                                         </div>
-                                                                    )}
+                                                                    )}                                                                    
                                                                 </div>
                                                                 
                                                                 {/* Filter: Only show recordings for CURRENT SENTENCE in Shadowing */}
@@ -2783,17 +2782,19 @@ const shareCollection = async (emailToInvite) => {
                                                                     const prefix = `Shadowing - ${source?.title} - S${activeIndex} -`;
                                                                     return r.title && r.title.startsWith(prefix);
                                                                 }).map(rec => (
-                                                                    <div key={rec.id} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
+                                                                    <div key={rec.id} className={`flex items-center justify-between p-3 bg-white border rounded-xl shadow-sm transition-all ${rec.isSyncing ? 'border-blue-200 opacity-80' : 'border-gray-100'}`}>
                                                                         <div className="flex items-center gap-3">
                                                                             <button onClick={() => togglePlayback(rec.file_url, rec.id)} className={`p-2 rounded-lg transition-all ${playbackState.id === rec.id && playbackState.isPlaying ? 'bg-black text-white' : 'bg-gray-50 hover:bg-gray-100 text-black'}`}>
                                                                                 {playbackState.id === rec.id && playbackState.isPlaying ? <Pause size={12} /> : <Play size={12} />}
                                                                             </button>
                                                                             <div className="flex flex-col">
-                                                                                <span className="text-[10px] font-bold text-gray-800 truncate max-w-[150px]">Recording</span>
+                                                                                <span className="text-[10px] font-bold text-gray-800 truncate max-w-[150px]">
+                                                                                    Recording {rec.isSyncing && <span className="text-blue-500 ml-1 animate-pulse">(Saving...)</span>}
+                                                                                </span>
                                                                                 <span className="text-[9px] text-gray-400">{new Date(rec.created_at).toLocaleTimeString()}</span>
                                                                             </div>
                                                                         </div>
-                                                                        <button onClick={() => deleteRecording(rec.id)} className="p-2 text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
+                                                                        <button onClick={() => !rec.isSyncing && deleteRecording(rec.id)} disabled={rec.isSyncing} className={`p-2 transition-colors ${rec.isSyncing ? 'text-gray-200 cursor-not-allowed' : 'text-gray-300 hover:text-red-500'}`}><Trash2 size={14} /></button>
                                                                     </div>
                                                                 ))}
                                                                 {/* Show message if empty */}
