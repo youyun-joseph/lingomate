@@ -2054,6 +2054,12 @@ const shareCollection = async (emailToInvite) => {
                 setRecordingsList(prev => [optimisticRecord, ...prev]);
                 setRecordedBlob(null);
 
+                // --- NEW: AUTO-PLAY IMMEDIATELY ---
+                // We only auto-play for Shadowing, not for the long Summary recordings
+                if (isShadowing) {
+                    togglePlayback(localUrl, tempId);
+                }
+
                 // --- 2. BACKGROUND SYNC (Supabase) ---
                 try {
                     const path = `${user.id}/recordings/${Date.now()}.webm`;
