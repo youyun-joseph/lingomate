@@ -332,6 +332,31 @@
             );
         };
 
+        const BibleModal = ({ isOpen, onClose }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 lg:p-8 bg-black/60 backdrop-blur-sm fade-in" onClick={onClose}>
+                    <div className="bg-white w-full max-w-5xl h-[85vh] rounded-3xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+                            <div className="flex items-center gap-2">
+                                <BookOpen className="w-5 h-5 text-indigo-600" />
+                                <h2 className="font-bold text-gray-800">Bible Study</h2>
+                            </div>
+                            <button onClick={onClose} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                                <X className="w-5 h-5 text-gray-500" />
+                            </button>
+                        </div>
+                        <div className="flex-1 w-full h-full bg-white relative">
+                            <div className="absolute inset-0 flex items-center justify-center -z-10">
+                                <Loader2 className="w-8 h-8 text-indigo-300 animate-spin" />
+                            </div>
+                            <iframe src="https://wd.bible/en/bible/gen.1.niv" className="w-full h-full border-none"></iframe>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         // --- UTILS & HELPERS ---
         const Spinner = () => <Loader2 className="w-4 h-4 animate-spin" />;
 
@@ -739,6 +764,7 @@ ALL EXPLANATIONS MUST BE IN CHINESE SIMPLIFIED (简体中文).`
 
         function App() {
             const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+            const [isBibleOpen, setIsBibleOpen] = useState(false);
             
             // --- NEW: Word & Phrase Panel State ---
             const [generatedVocab, setGeneratedVocab] = useState(null);
@@ -1000,6 +1026,10 @@ ALL EXPLANATIONS MUST BE IN CHINESE SIMPLIFIED (简体中文).`
                 const nextStart = transcript[idx + 1]?.start || Infinity;
                 return currentTime >= s.start && currentTime < nextStart;
             });
+
+            // --- NEW: Detect if we are in "Devotion" mode ---
+         const currentCollectionId = history.find(h => h.id === source?.id)?.collection_id || activeCollectionId;
+         const isDevotionMode = collections.find(c => c.id === currentCollectionId)?.name?.toLowerCase() === 'devotion';
 
             // --- NEW: Auto-Scroll Sidebar to Active Sentence ---
             useEffect(() => {
@@ -2159,6 +2189,7 @@ const shareCollection = async (emailToInvite) => {
                     />
                     <VocabularyModal isOpen={isVocabOpen} onClose={() => setIsVocabOpen(false)} words={vocabulary} onDelete={deleteVocabWord} />
                     <ConfirmModal isOpen={isReplaceConfirmOpen} title="Replace Session?" message="A session already exists for this file. Would you like to replace it?" onConfirm={() => { if (pendingFile) processFileUpload(pendingFile); setIsReplaceConfirmOpen(false); }} onCancel={() => setIsReplaceConfirmOpen(false)} />
+                    <BibleModal isOpen={isBibleOpen} onClose={() => setIsBibleOpen(false)} />
                     
                     {/* --- NEW: Bulk Progress Modal --- */}
                  {bulkProgress && (
@@ -2432,14 +2463,25 @@ const shareCollection = async (emailToInvite) => {
                                 </div>
                             )}
                             
-                            {/* Toggle Button: Transcript (DESKTOP ONLY) */}
-                            {!isMobile && !transcriptOpen && transcript.length > 0 && (
-                                <div className="absolute top-4 right-4 z-[60]">
-                                    <button onClick={() => setTranscriptOpen(true)} className="p-3 bg-white/50 backdrop-blur-md border border-gray-200/50 rounded-full text-gray-800 shadow-sm hover:bg-white hover:shadow-lg flex items-center gap-2 px-4 font-bold text-xs uppercase tracking-widest transition-all hover:scale-105 active:scale-95">
-                                        <span>Show Transcript</span> <FileText className="w-4 h-4" />
-                                    </button>
-                                </div>
-                            )}
+                            {/* Top Right Desktop Floating Buttons */}
+                         {!isMobile && (
+                             <div className="absolute top-4 right-4 z-[60] flex items-center gap-3">
+
+                                 {/* NEW: Conditional Bible Button */}
+                                 {isDevotionMode && (
+                                     <button onClick={() => setIsBibleOpen(true)} className="p-3 bg-white/50 backdrop-blur-md border border-gray-200/50 rounded-full text-gray-800 shadow-sm hover:bg-white hover:shadow-lg flex items-center gap-2 px-4 font-bold text-xs uppercase tracking-widest transition-all hover:scale-105 active:scale-95">
+                                         <span>Bible</span> <BookOpen className="w-4 h-4" />
+                                     </button>
+                                 )}
+
+                                 {/* Existing Transcript Button */}
+                                 {!transcriptOpen && transcript.length > 0 && (
+                                     <button onClick={() => setTranscriptOpen(true)} className="p-3 bg-white/50 backdrop-blur-md border border-gray-200/50 rounded-full text-gray-800 shadow-sm hover:bg-white hover:shadow-lg flex items-center gap-2 px-4 font-bold text-xs uppercase tracking-widest transition-all hover:scale-105 active:scale-95">
+                                         <span>Show Transcript</span> <FileText className="w-4 h-4" />
+                                     </button>
+                                 )}
+                             </div>
+                         )}
 
                             <div className="flex-1 flex flex-col overflow-y-auto relative custom-scrollbar">
                                 {/* UPDATE 1: Conditional Padding (pt-0 on mobile video, pt-20 otherwise) */}
@@ -2686,7 +2728,34 @@ const shareCollection = async (emailToInvite) => {
                                                         <FileText size={16} className="text-emerald-500" /> Transcript
                                                     </button>
                                                 </div>
-                                            )}
+                                            )}{/* --- NEW: Mobile Action Bar --- */}
+                                         {isMobile && (
+                                             <div className="flex gap-2 mt-4 mb-2 animate-in fade-in slide-in-from-bottom-2 px-1">
+                                                 <button 
+                                                     onClick={() => setSidebarOpen(true)} 
+                                                     className="flex-1 py-3.5 bg-white border border-gray-200 rounded-2xl shadow-sm font-bold text-[10px] sm:text-xs uppercase tracking-widest text-gray-700 flex items-center justify-center gap-1.5 hover:bg-gray-50 active:scale-95 transition-all"
+                                                 >
+                                                     <Layers size={16} className="text-indigo-500" /> Library
+                                                 </button>
+
+                                                 {/* NEW: Conditional Bible Button */}
+                                                 {isDevotionMode && (
+                                                     <button 
+                                                         onClick={() => setIsBibleOpen(true)} 
+                                                         className="flex-1 py-3.5 bg-white border border-gray-200 rounded-2xl shadow-sm font-bold text-[10px] sm:text-xs uppercase tracking-widest text-gray-700 flex items-center justify-center gap-1.5 hover:bg-gray-50 active:scale-95 transition-all"
+                                                     >
+                                                         <BookOpen size={16} className="text-blue-500" /> Bible
+                                                     </button>
+                                                 )}
+
+                                                 <button 
+                                                     onClick={() => setTranscriptOpen(true)} 
+                                                     className="flex-1 py-3.5 bg-white border border-gray-200 rounded-2xl shadow-sm font-bold text-[10px] sm:text-xs uppercase tracking-widest text-gray-700 flex items-center justify-center gap-1.5 hover:bg-gray-50 active:scale-95 transition-all"
+                                                 >
+                                                     <FileText size={16} className="text-emerald-500" /> Transcript
+                                                 </button>
+                                             </div>
+                                         )}
 
                                             <div className="bg-white border border-gray-100 rounded-3xl overflow-hidden shadow-sm flex flex-col mt-2">
                                                 {/* 1. UPDATED TABS LIST (Removed Grammar, Added Summary) */}
